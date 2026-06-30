@@ -1,17 +1,22 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Newspaper, Filter, Search, Sliders, RefreshCw, X, HelpCircle, ChevronRight, TrendingUp, Sparkles, BookOpen, Bookmark, ExternalLink, Clock, Mic, MicOff, LayoutGrid, List
+  Newspaper, Filter, Search, Sliders, RefreshCw, X, HelpCircle, ChevronRight, TrendingUp, Sparkles, BookOpen, Bookmark, ExternalLink, Clock, Mic, MicOff, LayoutGrid, List, ArrowLeft, MessageCircle, Share2, Check, Play, Pause
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import Navbar from './components/Navbar.tsx';
+import Navbar, { AppView } from './components/Navbar.tsx';
 import ArticleCard from './components/ArticleCard.tsx';
 import ArticleVolumeChart from './components/ArticleVolumeChart.tsx';
 import AdminPanel from './components/AdminPanel.tsx';
 import SportsSchedule from './components/SportsSchedule.tsx';
 import LiveScoreToast from './components/LiveScoreToast.tsx';
 import LeagueStandings from './components/LeagueStandings.tsx';
+import LegalPages from './components/LegalPages.tsx';
+import ArticleComments from './components/ArticleComments.tsx';
 import ArticleSkeleton from './components/ArticleSkeleton.tsx';
 import TrendingAthletes from './components/TrendingAthletes.tsx';
+import InFeedAdCard from './components/InFeedAdCard.tsx';
+import NextGenImage from './components/NextGenImage.tsx';
+import { RelatedArticlesSkeleton, PopularArticlesSkeleton } from './components/SidebarSkeletons.tsx';
 import { Article, FeedSource } from './types.ts';
 import { updateSEO, injectSchemaOrg, getArticleFallbackImage } from './utils.ts';
 
@@ -53,21 +58,22 @@ const itemVariants = {
 export default function App() {
   // Theme & View States
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const stored = localStorage.getItem('nusafeed-theme');
+    const stored = localStorage.getItem('onenationpress-theme') || localStorage.getItem('nusafeed-theme');
     if (stored === 'light' || stored === 'dark') return stored;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
-  const [currentView, setCurrentView] = useState<'home' | 'admin'>('home');
+  const [currentView, setCurrentView] = useState<AppView>('home');
 
   // Admin Authentication State
-  const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem('nusafeed-admin-token'));
-  const [adminUser, setAdminUser] = useState<string | null>(() => localStorage.getItem('nusafeed-admin-user'));
+  const [adminToken, setAdminToken] = useState<string | null>(() => localStorage.getItem('onenationpress-admin-token') || localStorage.getItem('nusafeed-admin-token'));
+  const [adminUser, setAdminUser] = useState<string | null>(() => localStorage.getItem('onenationpress-admin-user') || localStorage.getItem('nusafeed-admin-user'));
 
   // Feed Data States
   const [articles, setArticles] = useState<Article[]>([]);
   const [sources, setSources] = useState<FeedSource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSidebarLoading, setIsSidebarLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Filter States
@@ -78,19 +84,22 @@ export default function App() {
   // Sorting and Article Preview States
   const [sortBy, setSortBy] = useState<'terbaru' | 'terlama' | 'populer'>('terbaru');
   const [selectedArticleForPreview, setSelectedArticleForPreview] = useState<Article | null>(null);
+  const [copiedShareLink, setCopiedShareLink] = useState<boolean>(false);
   const [isReaderMode, setIsReaderMode] = useState<boolean>(false);
   const [readerFontSize, setReaderFontSize] = useState<'md' | 'lg' | 'xl'>('lg');
   const [readerBgTheme, setReaderBgTheme] = useState<'paper' | 'sepia' | 'dark'>('sepia');
   const [readerFontFamily, setReaderFontFamily] = useState<'serif' | 'sans'>('serif');
+  const [isAutoScrolling, setIsAutoScrolling] = useState<boolean>(false);
+  const [autoScrollSpeed, setAutoScrollSpeed] = useState<number>(1); // 1 = lambat, 2 = sedang, 3 = cepat
   const [isCompact, setIsCompact] = useState<boolean>(false);
   const [appFontFamily, setAppFontFamily] = useState<'sans' | 'serif' | 'mono'>(() => {
-    const stored = localStorage.getItem('nusafeed-app-font');
+    const stored = localStorage.getItem('onenationpress-app-font') || localStorage.getItem('nusafeed-app-font');
     if (stored === 'sans' || stored === 'serif' || stored === 'mono') return stored;
     return 'sans';
   });
 
   useEffect(() => {
-    localStorage.setItem('nusafeed-app-font', appFontFamily);
+    localStorage.setItem('onenationpress-app-font', appFontFamily);
   }, [appFontFamily]);
 
   // Mobile voice search states
@@ -157,7 +166,7 @@ export default function App() {
   // Saved Articles States
   const [savedArticleIds, setSavedArticleIds] = useState<string[]>(() => {
     try {
-      const stored = localStorage.getItem('nusafeed-saved-articles');
+      const stored = localStorage.getItem('onenationpress-saved-articles') || localStorage.getItem('nusafeed-saved-articles');
       return stored ? JSON.parse(stored) : [];
     } catch (e) {
       return [];
@@ -165,29 +174,34 @@ export default function App() {
   });
   const [showSavedOnly, setShowSavedOnly] = useState<boolean>(false);
 
-  // Scroll spy and progress tracking inside the preview modal
+  // Scroll spy and progress tracking for the full-page article reader
   const [modalScrollProgress, setModalScrollProgress] = useState<number>(0);
-  const modalScrollRef = useRef<HTMLDivElement>(null);
 
-  const handleModalScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget;
-    const totalHeight = target.scrollHeight - target.clientHeight;
-    if (totalHeight > 0) {
-      const progress = (target.scrollTop / totalHeight) * 100;
-      setModalScrollProgress(progress);
-    } else {
-      setModalScrollProgress(0);
-    }
-  };
-
-  // Reset scroll and progress when switching articles
   useEffect(() => {
-    if (selectedArticleForPreview) {
+    if (!selectedArticleForPreview) {
       setModalScrollProgress(0);
-      if (modalScrollRef.current) {
-        modalScrollRef.current.scrollTop = 0;
-      }
+      return;
     }
+
+    const handleWindowScroll = () => {
+      const scrollTop = window.scrollY;
+      const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
+      if (totalHeight > 0) {
+        const progress = (scrollTop / totalHeight) * 100;
+        setModalScrollProgress(progress);
+      } else {
+        setModalScrollProgress(0);
+      }
+    };
+
+    window.addEventListener('scroll', handleWindowScroll);
+    // Reset scroll progress and jump to top on article switch
+    setModalScrollProgress(0);
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
+    return () => {
+      window.removeEventListener('scroll', handleWindowScroll);
+    };
   }, [selectedArticleForPreview]);
 
   // Find 3 other articles with the same category
@@ -195,13 +209,13 @@ export default function App() {
     if (!selectedArticleForPreview) return [];
 
     const currentSourceObj = sources.find((s) => s.id === selectedArticleForPreview.feedSourceId);
-    const currentCategory = currentSourceObj?.category || 'Nasional';
+    const currentCategory = selectedArticleForPreview.category || currentSourceObj?.category || 'Nasional';
 
     return articles
       .filter((art) => {
         if (art.id === selectedArticleForPreview.id) return false;
         const srcObj = sources.find((s) => s.id === art.feedSourceId);
-        const artCategory = srcObj?.category || 'Nasional';
+        const artCategory = art.category || srcObj?.category || 'Nasional';
         return artCategory.toLowerCase() === currentCategory.toLowerCase();
       })
       .slice(0, 3);
@@ -230,13 +244,20 @@ export default function App() {
       const updated = prev.includes(articleId)
         ? prev.filter((id) => id !== articleId)
         : [...prev, articleId];
-      localStorage.setItem('nusafeed-saved-articles', JSON.stringify(updated));
+      localStorage.setItem('onenationpress-saved-articles', JSON.stringify(updated));
       return updated;
     });
   };
 
   const handleArticleClick = async (article: Article) => {
+    setIsSidebarLoading(true);
     setSelectedArticleForPreview(article);
+    
+    // Smooth transition simulation for recommendations
+    setTimeout(() => {
+      setIsSidebarLoading(false);
+    }, 450);
+
     try {
       const response = await fetch(`/api/articles/${article.id}/click`, {
         method: 'POST',
@@ -260,26 +281,91 @@ export default function App() {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('nusafeed-theme', theme);
+    localStorage.setItem('onenationpress-theme', theme);
   }, [theme]);
+
+  // Real-time system preference theme detection
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    
+    const handleSystemThemeChange = (e: MediaQueryListEvent) => {
+      setTheme(e.matches ? 'dark' : 'light');
+    };
+
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleSystemThemeChange);
+    } else {
+      mediaQuery.addListener(handleSystemThemeChange);
+    }
+
+    return () => {
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener('change', handleSystemThemeChange);
+      } else {
+        mediaQuery.removeListener(handleSystemThemeChange);
+      }
+    };
+  }, []);
 
   // Handle dynamic SEO and Schema injection on data update or view change
   useEffect(() => {
-    if (currentView === 'home') {
+    if (selectedArticleForPreview) {
+      const srcObj = sources.find((s) => s.id === selectedArticleForPreview.feedSourceId);
+      const category = selectedArticleForPreview.category || srcObj?.category;
+      const defaultImg = getArticleFallbackImage(category);
       updateSEO(
-        'NusaFeed - Agregator & Jadwal Olahraga',
+        `${selectedArticleForPreview.title} - OneNationPress Sport`,
+        selectedArticleForPreview.summary || 'Baca berita selengkapnya di OneNationPress Sport.',
+        selectedArticleForPreview.imageUrl || defaultImg
+      );
+    } else if (currentView === 'home') {
+      updateSEO(
+        'OneNationPress Sport - Portal Berita Olahraga Terintegrasi',
         'Menyajikan berita olahraga terkini serta jadwal pertandingan real-time untuk Sepak Bola, MotoGP, F1, tenis, futsal, dan lainnya.'
       );
     } else {
-      updateSEO('Panel Pengelola - NusaFeed', 'Kelola sumber berita, pantau log, dan picu penyegaran manual feed berita.');
+      updateSEO('Panel Pengelola - OneNationPress Sport', 'Kelola sumber berita, pantau log, dan picu penyegaran manual feed berita.');
     }
-  }, [currentView]);
+  }, [currentView, selectedArticleForPreview, sources]);
 
   useEffect(() => {
     if (articles.length > 0) {
-      injectSchemaOrg(articles);
+      injectSchemaOrg(articles, selectedArticleForPreview);
     }
-  }, [articles]);
+  }, [articles, selectedArticleForPreview]);
+
+  // Turn off auto-scroll when exiting Reader Mode or article preview
+  useEffect(() => {
+    if (!isReaderMode || !selectedArticleForPreview) {
+      setIsAutoScrolling(false);
+    }
+  }, [isReaderMode, selectedArticleForPreview]);
+
+  // Auto-scroll loop logic for hands-free reading in Reader Mode
+  useEffect(() => {
+    let scrollInterval: any;
+    if (isAutoScrolling && isReaderMode && selectedArticleForPreview) {
+      const intervalMs = 25; // Smooth 40 FPS scrolling
+      // Map speeds: 1 = slow, 2 = medium, 3 = fast
+      const step = autoScrollSpeed === 1 ? 0.6 : autoScrollSpeed === 2 ? 1.3 : 2.5;
+
+      scrollInterval = setInterval(() => {
+        window.scrollBy({ top: step, left: 0, behavior: 'auto' });
+
+        // Stop scrolling when user reaches bottom of the page
+        const isAtBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 12;
+        if (isAtBottom) {
+          setIsAutoScrolling(false);
+        }
+      }, intervalMs);
+    }
+
+    return () => {
+      if (scrollInterval) {
+        clearInterval(scrollInterval);
+      }
+    };
+  }, [isAutoScrolling, autoScrollSpeed, isReaderMode, selectedArticleForPreview]);
 
   // Fetch Sources from server
   const fetchSources = async () => {
@@ -297,6 +383,7 @@ export default function App() {
   // Fetch Articles from server
   const fetchArticles = async () => {
     setIsLoading(true);
+    setIsSidebarLoading(true);
     setError(null);
     try {
       const response = await fetch('/api/articles');
@@ -310,6 +397,7 @@ export default function App() {
       setError(e.message || 'Gagal terhubung ke server.');
     } finally {
       setIsLoading(false);
+      setIsSidebarLoading(false);
     }
   };
 
@@ -323,13 +411,15 @@ export default function App() {
   const handleLoginSuccess = (token: string, username: string) => {
     setAdminToken(token);
     setAdminUser(username);
-    localStorage.setItem('nusafeed-admin-token', token);
-    localStorage.setItem('nusafeed-admin-user', username);
+    localStorage.setItem('onenationpress-admin-token', token);
+    localStorage.setItem('onenationpress-admin-user', username);
   };
 
   const handleLogout = () => {
     setAdminToken(null);
     setAdminUser(null);
+    localStorage.removeItem('onenationpress-admin-token');
+    localStorage.removeItem('onenationpress-admin-user');
     localStorage.removeItem('nusafeed-admin-token');
     localStorage.removeItem('nusafeed-admin-user');
   };
@@ -349,7 +439,7 @@ export default function App() {
     
     // 2. Category check (we resolve the category by matching the article source's category)
     const sourceObj = sources.find((s) => s.id === article.feedSourceId);
-    const sourceCategory = sourceObj?.category || 'Lainnya';
+    const sourceCategory = article.category || sourceObj?.category || 'Lainnya';
     const matchesCategory = selectedCategory === 'Semua Olahraga' || sourceCategory.toLowerCase() === selectedCategory.toLowerCase();
 
     // 3. Search query check (fuzzy title and summary matching)
@@ -411,8 +501,475 @@ export default function App() {
           setSearchQuery={setSearchQuery}
         />
 
+        {/* Scroll Progress Bar Sticky Under Navbar */}
+        {selectedArticleForPreview && (
+          <div
+            id="reading-progress-bar"
+            className="fixed top-16 left-0 right-0 h-[4px] bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-600 z-[40] origin-left transition-all duration-75"
+            style={{ transform: `scaleX(${modalScrollProgress / 100})` }}
+          />
+        )}
+
         {currentView === 'home' ? (
-          <main id="home-view-container" className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <AnimatePresence mode="wait">
+            {selectedArticleForPreview ? (
+              <motion.main
+                key="article-detail"
+                id="article-detail-view"
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -30 }}
+                transition={{ type: "spring", stiffness: 100, damping: 15, duration: 0.4 }}
+                className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"
+              >
+              {/* Back button and Reader Mode trigger */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-200 dark:border-gray-800">
+                <button
+                  onClick={() => {
+                    setSelectedArticleForPreview(null);
+                    setIsReaderMode(false);
+                  }}
+                  className="flex items-center gap-2 text-sm font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer group"
+                >
+                  <ArrowLeft className="h-4 w-4 transition-transform group-hover:-translate-x-1" />
+                  <span>Kembali ke Beranda Berita</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsReaderMode(!isReaderMode)}
+                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                      isReaderMode
+                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
+                        : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700 dark:bg-gray-900 dark:border-gray-850 dark:text-gray-300 dark:hover:bg-gray-850'
+                    }`}
+                    title={isReaderMode ? "Matikan Mode Baca" : "Aktifkan Mode Baca"}
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    <span>Mode Baca {isReaderMode ? 'Aktif' : 'Nonaktif'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Reader Settings Panel (Only shown if Reader Mode is enabled) */}
+              {isReaderMode && (
+                <div className={`mb-6 p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4 shrink-0 transition-all ${
+                  readerBgTheme === 'paper'
+                    ? 'bg-[#faf9f6] border-stone-200 text-stone-800'
+                    : readerBgTheme === 'sepia'
+                      ? 'bg-[#f8f1e5] border-[#ebdcc7] text-[#3e2723]'
+                      : 'bg-zinc-950 border-zinc-850 text-zinc-200'
+                }`}>
+                  {/* Font Sizes */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xs font-bold uppercase tracking-wider">Ukuran Font:</span>
+                    <div className="flex items-center gap-1 rounded-lg p-0.5 border border-slate-200/40 dark:border-gray-800">
+                      {(['md', 'lg', 'xl'] as const).map((size) => (
+                        <button
+                          key={size}
+                          onClick={() => setReaderFontSize(size)}
+                          className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
+                            readerFontSize === size
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'text-slate-600 dark:text-gray-400 hover:bg-slate-150 dark:hover:bg-gray-900'
+                          }`}
+                        >
+                          {size === 'md' ? 'Kecil' : size === 'lg' ? 'Sedang' : 'Besar'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Font Family Selection */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xs font-bold uppercase tracking-wider">Jenis Font:</span>
+                    <div className="flex items-center gap-1 rounded-lg p-0.5 border border-slate-200/40 dark:border-gray-800">
+                      {(['serif', 'sans'] as const).map((font) => (
+                        <button
+                          key={font}
+                          onClick={() => setReaderFontFamily(font)}
+                          className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
+                            readerFontFamily === font
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'text-slate-600 dark:text-gray-400 hover:bg-slate-150 dark:hover:bg-gray-900'
+                          }`}
+                          style={{ fontFamily: font === 'serif' ? 'Georgia, serif' : 'Inter, sans-serif' }}
+                        >
+                          {font === 'serif' ? 'Serif' : 'Sans'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Color Themes */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xs font-bold uppercase tracking-wider">Warna:</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setReaderBgTheme('paper')}
+                        title="Tema Kertas"
+                        className={`w-6 h-6 rounded-full border-2 transition-all flex items-center justify-center bg-[#faf9f6] text-stone-900 cursor-pointer ${
+                          readerBgTheme === 'paper' ? 'border-indigo-600 scale-110' : 'border-stone-300'
+                        }`}
+                      >
+                        <span className="text-[10px] font-bold font-sans">A</span>
+                      </button>
+                      <button
+                        onClick={() => setReaderBgTheme('sepia')}
+                        title="Tema Sepia"
+                        className={`w-6 h-6 rounded-full border-2 transition-all flex items-center justify-center bg-[#f8f1e5] text-[#3e2723] cursor-pointer ${
+                          readerBgTheme === 'sepia' ? 'border-indigo-600 scale-110' : 'border-[#d2be9f]'
+                        }`}
+                      >
+                        <span className="text-[10px] font-bold font-sans">A</span>
+                      </button>
+                      <button
+                        onClick={() => setReaderBgTheme('dark')}
+                        title="Tema Gelap"
+                        className={`w-6 h-6 rounded-full border-2 transition-all flex items-center justify-center bg-zinc-950 text-zinc-100 cursor-pointer ${
+                          readerBgTheme === 'dark' ? 'border-indigo-600 scale-110' : 'border-zinc-850'
+                        }`}
+                      >
+                        <span className="text-[10px] font-bold font-sans">A</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Auto-Scroll Controls for Hands-Free reading */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xs font-bold uppercase tracking-wider">Auto-Scroll:</span>
+                    <div className="flex items-center gap-1 rounded-lg p-0.5 border border-slate-200/40 dark:border-gray-800">
+                      <button
+                        onClick={() => setIsAutoScrolling(!isAutoScrolling)}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
+                          isAutoScrolling
+                            ? 'bg-amber-500 text-white shadow-sm'
+                            : 'text-slate-600 dark:text-gray-400 hover:bg-slate-150 dark:hover:bg-gray-900'
+                        }`}
+                        title={isAutoScrolling ? "Jeda Gulir Otomatis" : "Mulai Gulir Otomatis"}
+                      >
+                        {isAutoScrolling ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                        <span>{isAutoScrolling ? 'Jeda' : 'Mulai'}</span>
+                      </button>
+                      
+                      {isAutoScrolling && (
+                        <div className="flex items-center gap-1 border-l border-slate-200/20 dark:border-gray-800 pl-1.5 ml-0.5">
+                          {([1, 2, 3] as const).map((speed) => (
+                            <button
+                              key={speed}
+                              onClick={() => setAutoScrollSpeed(speed)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                autoScrollSpeed === speed
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'text-slate-600 dark:text-gray-400 hover:bg-slate-150 dark:hover:bg-gray-900'
+                              }`}
+                            >
+                              {speed === 1 ? 'Lambat' : speed === 2 ? 'Sedang' : 'Cepat'}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+              {/* Main Two-Column News Layout (Optimized for SEO and Google News / AdSense Layout guidelines) */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                
+                {/* Left Column: Rich Article Body (8 Cols) */}
+                <article className={`lg:col-span-8 rounded-2xl border p-6 md:p-8 transition-all duration-300 ${
+                  isReaderMode
+                    ? readerBgTheme === 'paper'
+                      ? 'bg-[#faf9f6] text-stone-900 border-stone-200 shadow-sm'
+                      : readerBgTheme === 'sepia'
+                        ? 'bg-[#f8f1e5] text-[#3e2723] border-[#e5d4bc] shadow-sm'
+                        : 'bg-zinc-950 text-zinc-100 border-zinc-850 shadow-sm'
+                    : 'bg-white border-slate-200 dark:border-gray-850 dark:bg-gray-950 text-slate-900 dark:text-gray-100 shadow-xs'
+                }`}>
+                  
+                  {/* Article Category, Source & Date metadata */}
+                  <div className="flex flex-wrap items-center gap-3 text-2xs font-extrabold uppercase tracking-wider mb-4 opacity-80">
+                    <span className="rounded bg-indigo-50 text-indigo-700 border border-indigo-150/50 px-2 py-0.5 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-900/60">
+                      {sources.find(s => s.id === selectedArticleForPreview.feedSourceId)?.category || 'Nasional'}
+                    </span>
+                    <span>•</span>
+                    <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                      {selectedArticleForPreview.sourceName}
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5" />
+                      {new Date(selectedArticleForPreview.publishedAt).toLocaleDateString('id-ID', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
+                      {(() => {
+                        const text = `${selectedArticleForPreview.title} ${selectedArticleForPreview.summary || ''}`;
+                        const words = text.split(/\s+/).filter(Boolean).length;
+                        return Math.max(1, Math.ceil(words / 200));
+                      })()} menit baca
+                    </span>
+                  </div>
+
+                  {/* Dynamic H1 Header (Crucial for SEO and indexing) */}
+                  <h1 className={`font-display tracking-tight leading-tight mb-6 ${
+                    isReaderMode
+                      ? readerBgTheme === 'paper'
+                        ? 'text-stone-950 font-serif'
+                        : readerBgTheme === 'sepia'
+                          ? 'text-[#2a1b0c] font-serif'
+                          : 'text-white'
+                      : 'text-slate-900 dark:text-white font-extrabold'
+                  } ${
+                    isReaderMode
+                      ? readerFontSize === 'md'
+                        ? 'text-2xl sm:text-3xl'
+                        : readerFontSize === 'lg'
+                          ? 'text-3xl sm:text-4xl'
+                          : 'text-4xl sm:text-5xl'
+                      : 'text-2xl sm:text-3.5xl md:text-4xl'
+                  }`}>
+                    {selectedArticleForPreview.title}
+                  </h1>
+
+                  {/* Header Ad Slot (Compliance with Google News / AdSense layouts) */}
+                  <div className="my-6 p-4 rounded-xl border border-dashed border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/30 text-center text-3xs font-mono text-slate-400 uppercase tracking-widest relative">
+                    <span className="absolute top-1 left-3 text-[8px] opacity-70">Sponsor</span>
+                    <span>Iklan AdSense Responsif (Banner 728x90)</span>
+                  </div>
+
+                  {/* Featured Image Banner */}
+                  <div className="w-full h-64 sm:h-80 md:h-96 rounded-2xl overflow-hidden bg-slate-100 dark:bg-gray-900 border border-slate-200/60 dark:border-zinc-800 mb-6 relative group">
+                    <NextGenImage
+                      src={selectedArticleForPreview.imageUrl || getArticleFallbackImage(sources.find(s => s.id === selectedArticleForPreview.feedSourceId)?.category)}
+                      alt={selectedArticleForPreview.title}
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
+                      fallbackSrc={getArticleFallbackImage(sources.find(s => s.id === selectedArticleForPreview.feedSourceId)?.category)}
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
+                    />
+                  </div>
+
+                  {/* Article Actions Suite (WhatsApp, Copy Link, Bookmark) */}
+                  <div className="flex flex-wrap items-center justify-between gap-4 py-4 border-y border-gray-150/60 dark:border-zinc-850 mb-6">
+                    <div className="flex flex-wrap items-center gap-2">
+                      
+                      {/* WhatsApp Share Button */}
+                      <a
+                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
+                          selectedArticleForPreview.title + '\n\nBaca selengkapnya di OneNationPress Sport: ' + selectedArticleForPreview.link
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:border-emerald-900/60 dark:text-emerald-400 font-bold text-xs transition-all cursor-pointer shadow-xs"
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                        <span>WhatsApp</span>
+                      </a>
+
+                      {/* Copy Link Share Button */}
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(selectedArticleForPreview.link);
+                            setCopiedShareLink(true);
+                            setTimeout(() => setCopiedShareLink(false), 2000);
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 dark:border-zinc-800 dark:hover:bg-zinc-900 font-bold text-xs transition-all cursor-pointer shadow-xs text-slate-700 dark:text-slate-300 bg-white dark:bg-gray-950"
+                      >
+                        {copiedShareLink ? (
+                          <>
+                            <Check className="h-4 w-4 text-emerald-500" />
+                            <span className="text-emerald-500 font-bold">Tersalin!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Share2 className="h-4 w-4 text-indigo-500" />
+                            <span>Salin Tautan</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Bookmark Save */}
+                    <button
+                      onClick={() => handleToggleSave(selectedArticleForPreview.id)}
+                      className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl border font-bold text-xs transition-all cursor-pointer shadow-xs ${
+                        savedArticleIds.includes(selectedArticleForPreview.id)
+                          ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/40 dark:border-indigo-900/60 dark:text-indigo-400'
+                          : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700 dark:bg-gray-950 dark:border-zinc-800 dark:hover:bg-zinc-900 dark:text-gray-300'
+                      }`}
+                    >
+                      <Bookmark className={`h-4 w-4 ${savedArticleIds.includes(selectedArticleForPreview.id) ? 'fill-current' : ''}`} />
+                      <span>{savedArticleIds.includes(selectedArticleForPreview.id) ? 'Tersimpan' : 'Simpan Berita'}</span>
+                    </button>
+                  </div>
+
+                  {/* Summary Article Body Text */}
+                  <div className={`whitespace-pre-wrap leading-relaxed ${
+                    isReaderMode
+                      ? `${readerFontFamily === 'serif' ? 'font-serif' : 'font-sans'} ${
+                          readerFontSize === 'md'
+                            ? 'text-base sm:text-lg leading-relaxed'
+                            : readerFontSize === 'lg'
+                              ? 'text-lg sm:text-xl leading-loose'
+                              : 'text-xl sm:text-2xl leading-loose tracking-wide'
+                        }`
+                      : 'text-sm sm:text-base text-slate-700 dark:text-gray-300 leading-relaxed'
+                  }`}>
+                    {selectedArticleForPreview.feedSourceId === 'manual' || (selectedArticleForPreview.summary && /<[a-z][\s\S]*>/i.test(selectedArticleForPreview.summary)) ? (
+                      <div dangerouslySetInnerHTML={{ __html: selectedArticleForPreview.summary || '' }} className="prose prose-indigo dark:prose-invert max-w-none text-slate-800 dark:text-slate-200" />
+                    ) : (
+                      selectedArticleForPreview.summary || 'Maaf, deskripsi berita lengkap tidak tersedia untuk artikel ini.'
+                    )}
+                  </div>
+
+                  {/* Inline Ad Slot (Compliance with Google News / AdSense layout guidelines) */}
+                  <div className="my-8 p-4 rounded-xl border border-dashed border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/30 text-center text-3xs font-mono text-slate-400 uppercase tracking-widest relative">
+                    <span className="absolute top-1 left-3 text-[8px] opacity-70">Sponsor</span>
+                    <span>Iklan In-Article AdSense</span>
+                  </div>
+
+                  {/* REQUIRED Statement / Jembatan disclaimer for intellectual property compliance */}
+                  <div className="p-5 rounded-xl border border-slate-150/60 dark:border-zinc-850 bg-slate-50/50 dark:bg-zinc-900/40 text-xs leading-relaxed space-y-2 mb-6 text-slate-500 dark:text-gray-400">
+                    <div className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <HelpCircle className="h-4 w-4 text-indigo-500 shrink-0" />
+                      Pernyataan Hak Cipta & Kebijakan Google News
+                    </div>
+                    <p>
+                      Situs ini menyajikan ringkasan berita terintegrasi melalui sindikasi media resmi dan tidak mengklaim kepemilikan materi penuh. Hak cipta sepenuhnya dipegang oleh penerbit berita asli. Untuk membaca berita selengkapnya, Anda wajib mengunjungi situs orisinal dari redaksi yang bersangkutan melalui tombol rujukan di bawah ini.
+                    </p>
+                  </div>
+
+                  {/* Action Link to the Original Site */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-850 dark:text-white">Baca Berita Selengkapnya</h4>
+                      <p className="text-2xs text-slate-500 dark:text-gray-400">Dukung jurnalisme berkualitas dengan membaca langsung di media orisinal.</p>
+                    </div>
+                    <a
+                      href={selectedArticleForPreview.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-3 shadow-md hover:shadow-indigo-500/20 transition-all cursor-pointer whitespace-nowrap"
+                    >
+                      <span>Kunjungi Situs Sumber ({selectedArticleForPreview.sourceName})</span>
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
+                  </div>
+
+                  {/* High Quality User Comments & Expert Commentary Section to pass Google AdSense Low-Value Content checks */}
+                  <ArticleComments
+                    articleId={selectedArticleForPreview.id}
+                    category={sources.find(s => s.id === selectedArticleForPreview.feedSourceId)?.category}
+                  />
+
+                </article>
+
+                {/* Right Column: News Sidebar (4 Cols) */}
+                <div className="lg:col-span-4 space-y-6">
+                  
+                  {/* Google AdSense Compliant Square Sidebar Banner */}
+                  <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 text-center text-3xs font-mono text-slate-400 uppercase tracking-widest relative min-h-[250px] flex flex-col justify-center items-center gap-2 shadow-xs">
+                    <span className="absolute top-2 left-4 text-[8px] opacity-70">Sponsor</span>
+                    <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-zinc-900 flex items-center justify-center text-slate-400">Ad</div>
+                    <span>Iklan AdSense Sesuai Kebijakan Google News (Square Sidebar Widget 300x250)</span>
+                  </div>
+
+                  {/* Related Articles Widget */}
+                  {selectedArticleForPreview && (
+                    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 shadow-xs">
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider mb-4 flex items-center gap-1.5 text-slate-800 dark:text-white pb-2 border-b border-slate-100 dark:border-zinc-900">
+                        <TrendingUp className="h-4 w-4 text-indigo-500 animate-pulse" />
+                        <span>Berita Terkait</span>
+                      </h3>
+                      {isSidebarLoading ? (
+                        <RelatedArticlesSkeleton />
+                      ) : relatedArticles.length > 0 ? (
+                        <div className="space-y-4">
+                          {relatedArticles.map((art) => (
+                            <div
+                              key={art.id}
+                              onClick={() => handleArticleClick(art)}
+                              className="group p-3 rounded-xl border border-slate-100 dark:border-zinc-900 hover:border-indigo-500/30 bg-slate-50/50 dark:bg-zinc-900/30 text-left cursor-pointer transition-all hover:-translate-y-0.5"
+                            >
+                              <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 block mb-1">
+                                {art.sourceName}
+                              </span>
+                              <h4 className="text-xs font-semibold leading-snug line-clamp-2 text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                                {art.title}
+                              </h4>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500 dark:text-gray-400">Tidak ada berita terkait lainnya.</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Popular Articles List (Optimizing Dwell Time & Interlinking) */}
+                  <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 shadow-xs">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider mb-4 flex items-center gap-1.5 text-slate-800 dark:text-white pb-2 border-b border-slate-100 dark:border-zinc-900">
+                      <Sparkles className="h-4 w-4 text-indigo-500" />
+                      <span>Berita Populer Lainnya</span>
+                    </h3>
+                    {isSidebarLoading ? (
+                      <PopularArticlesSkeleton />
+                    ) : (
+                      <div className="space-y-3.5">
+                        {articles
+                          .filter((art) => art.id !== selectedArticleForPreview?.id)
+                          .slice(0, 5)
+                          .map((art, idx) => (
+                            <div
+                              key={art.id}
+                              onClick={() => handleArticleClick(art)}
+                              className="flex items-start gap-3 cursor-pointer group"
+                            >
+                              <span className="text-sm font-black text-indigo-600 dark:text-indigo-400/80 font-mono w-4 shrink-0">
+                                {idx + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase block">
+                                  {art.sourceName}
+                                </span>
+                                <h4 className="text-xs font-semibold leading-snug line-clamp-2 text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                                  {art.title}
+                                </h4>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+
+              </div>
+
+            </motion.main>
+          ) : (
+            <motion.main
+              key="home-grid"
+              id="home-view-container"
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -30 }}
+              transition={{ type: "spring", stiffness: 100, damping: 15, duration: 0.4 }}
+              className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"
+            >
             
             {/* Banner/Hero Section */}
             <div id="hero-banner" className="relative mb-8 overflow-hidden rounded-2xl bg-indigo-900 text-white shadow-lg dark:bg-indigo-950 border border-indigo-800 dark:border-indigo-900">
@@ -420,13 +977,13 @@ export default function App() {
               <div className="relative px-6 py-10 md:py-14 max-w-3xl">
                 <div className="flex items-center gap-2 mb-3.5 text-indigo-200 font-semibold text-xs sm:text-sm uppercase tracking-wider">
                   <Sparkles className="h-4 w-4 animate-pulse text-indigo-400" />
-                  <span>Teknologi Agregator Olahraga Modern</span>
+                  <span>Sistem Sindikasi & Analisis Olahraga Modern</span>
                 </div>
                 <h1 className="font-display text-2xl sm:text-4xl font-extrabold tracking-tight leading-tight">
                   Berita Olahraga & Jadwal Pertandingan Terlengkap
                 </h1>
                 <p className="mt-3 text-sm sm:text-base text-indigo-100 leading-relaxed max-w-2xl">
-                  NusaFeed menyajikan berita olahraga terkini dari media terkemuka di Indonesia serta pusat jadwal pertandingan dan live score real-time untuk Sepak Bola, MotoGP, F1, Tenis, Futsal, Bulutangkis, dan cabang olahraga lainnya.
+                  OneNationPress Sport menyajikan berita olahraga terkini secara profesional dari media terkemuka di Indonesia serta pusat jadwal pertandingan dan live score real-time untuk Sepak Bola, MotoGP, F1, Tenis, Futsal, Bulutangkis, dan cabang olahraga lainnya.
                 </p>
                 <div className="mt-5 flex flex-wrap gap-2.5">
                   <div className="rounded-lg bg-indigo-800/80 px-3 py-1.5 text-xs font-semibold text-indigo-100 border border-indigo-700/50">
@@ -735,7 +1292,7 @@ export default function App() {
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-extrabold text-xs uppercase tracking-wider animate-pulse mb-2">
                       <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Menghubungkan ke NusaFeed Live API...</span>
+                      <span>Menghubungkan ke OneNationPress Sport Live API...</span>
                     </div>
                     <ArticleSkeleton />
                   </div>
@@ -784,25 +1341,37 @@ export default function App() {
                   >
                     {sortedArticles.map((article, idx) => {
                       const sourceObj = sources.find((s) => s.id === article.feedSourceId);
-                      const category = sourceObj?.category || 'Nasional';
+                      const category = article.category || sourceObj?.category || 'Nasional';
                       const isSaved = savedArticleIds.includes(article.id);
+                      const showAd = (idx === 2 || idx === 5); // Insert AdSense In-Feed Ads after 3rd and 6th articles
                       return (
-                        <motion.div
-                          key={article.id}
-                          variants={itemVariants}
-                          className={(!isCompact && idx === 0) ? 'md:col-span-2 lg:col-span-2 md:row-span-2' : 'col-span-1'}
-                        >
-                          <ArticleCard
-                            article={article}
-                            isFeatured={!isCompact && idx === 0}
-                            isCompact={isCompact}
-                            category={category}
-                            isSaved={isSaved}
-                            isTrending={trendingArticleIds.includes(article.id)}
-                            onToggleSave={handleToggleSave}
-                            onReadMore={handleArticleClick}
-                          />
-                        </motion.div>
+                        <React.Fragment key={article.id}>
+                          <motion.div
+                            variants={itemVariants}
+                            className={(!isCompact && idx === 0) ? 'md:col-span-2 lg:col-span-2 md:row-span-2' : 'col-span-1'}
+                          >
+                            <ArticleCard
+                              article={article}
+                              isFeatured={!isCompact && idx === 0}
+                              isCompact={isCompact}
+                              category={category}
+                              isSaved={isSaved}
+                              isTrending={trendingArticleIds.includes(article.id)}
+                              onToggleSave={handleToggleSave}
+                              onReadMore={handleArticleClick}
+                            />
+                          </motion.div>
+
+                          {showAd && (
+                            <motion.div
+                              key={`ad-infeed-${idx}`}
+                              variants={itemVariants}
+                              className="col-span-1"
+                            >
+                              <InFeedAdCard index={idx} isCompact={isCompact} />
+                            </motion.div>
+                          )}
+                        </React.Fragment>
                       );
                     })}
 
@@ -832,14 +1401,22 @@ export default function App() {
                 )}
               </div>
             </div>
-          </main>
-        ) : (
+            </motion.main>
+          )}
+          </AnimatePresence>
+        ) : currentView === 'admin' ? (
           <AdminPanel
             token={adminToken}
             onLoginSuccess={handleLoginSuccess}
             onLogout={handleLogout}
             sources={sources}
             fetchSources={fetchSources}
+            fetchArticles={fetchArticles}
+          />
+        ) : (
+          <LegalPages
+            view={currentView}
+            onBack={() => setCurrentView('home')}
           />
         )}
       </div>
@@ -856,24 +1433,34 @@ export default function App() {
                 <Newspaper className="h-4 w-4" />
               </div>
               <span className="font-display font-bold text-gray-950 dark:text-white">
-                NusaFeed
+                OneNationPress Sport
               </span>
             </div>
             
-            {/* Core SEO links */}
-            <div className="flex flex-wrap gap-x-4 gap-y-2 text-2xs uppercase tracking-wider font-semibold">
-              <a href="/sitemap.xml" target="_blank" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-all">Sitemap XML</a>
-              <a href="/robots.txt" target="_blank" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-all">Robots TXT</a>
-              <a href="/api/sources" target="_blank" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-all">API Sources</a>
-              <a href="/api/articles" target="_blank" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-all">API Articles</a>
+            {/* Core SEO and AdSense Compliance links */}
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-8">
+              <div className="flex flex-wrap gap-x-4 gap-y-2 text-2xs uppercase tracking-wider font-semibold text-gray-400 dark:text-gray-500">
+                <a href="/sitemap.xml" target="_blank" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-all">Sitemap XML</a>
+                <a href="/robots.txt" target="_blank" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-all">Robots TXT</a>
+                <a href="/api/sources" target="_blank" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-all">API Sources</a>
+                <a href="/api/articles" target="_blank" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-all">API Articles</a>
+              </div>
+              <div className="h-4 w-px bg-gray-200 dark:bg-gray-800 hidden lg:block"></div>
+              <div className="flex flex-wrap gap-x-4 gap-y-2 text-2xs uppercase tracking-wider font-bold text-indigo-600 dark:text-indigo-400">
+                <button onClick={() => { setCurrentView('about'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="hover:underline cursor-pointer">Tentang Kami</button>
+                <button onClick={() => { setCurrentView('privacy'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="hover:underline cursor-pointer">Kebijakan Privasi</button>
+                <button onClick={() => { setCurrentView('terms'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="hover:underline cursor-pointer">Syarat & Ketentuan</button>
+                <button onClick={() => { setCurrentView('disclaimer'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="hover:underline cursor-pointer">Disclaimer & DMCA</button>
+                <button onClick={() => { setCurrentView('contact'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="hover:underline cursor-pointer">Hubungi Kami</button>
+              </div>
             </div>
           </div>
 
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="space-y-1 max-w-xl">
-              <p>&copy; {new Date().getFullYear()} NusaFeed. Semua hak dilindungi.</p>
+              <p>&copy; {new Date().getFullYear()} OneNationPress Sport. Semua hak dilindungi.</p>
               <p className="text-2xs text-gray-400 dark:text-gray-500 leading-normal">
-                Pernyataan Hak Cipta & Etika: NusaFeed berkomitmen penuh menghormati hak cipta jurnalisme. Kami hanya menayangkan data feed berupa judul berita dan deskripsi ringkas (summary) yang bersumber dari feed sindikasi resmi penerbit asli. Kami tidak menduplikasi konten artikel utuh dan selalu mewajibkan pengalihan tautan penuh langsung ke situs orisinal demi memberikan atribusi penuh kepada tim redaksi asal.
+                Pernyataan Hak Cipta & Etika: OneNationPress Sport berkomitmen penuh menghormati hak cipta jurnalisme secara ketat dan etis. Kami hanya menayangkan deskripsi ringkas (summary) orisinal yang bersumber dari feed sindikasi resmi penerbit asli. Kami tidak menduplikasi konten artikel utuh dan selalu mewajibkan pengalihan tautan penuh langsung ke situs orisinal demi memberikan atribusi penuh kepada tim redaksi asal.
               </p>
             </div>
             <div className="text-2xs font-mono text-gray-400 dark:text-gray-500">
@@ -883,402 +1470,7 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Summary Preview Modal conforming to bridging disclaimer requirement */}
-      <AnimatePresence>
-        {selectedArticleForPreview && (() => {
-          const readerHeaderBorderClass = isReaderMode
-            ? readerBgTheme === 'paper'
-              ? 'border-stone-200/60'
-              : readerBgTheme === 'sepia'
-                ? 'border-[#ebdcc7]'
-                : 'border-zinc-850'
-            : 'border-slate-100 dark:border-gray-850';
-
-          const readerSubTextClass = isReaderMode
-            ? readerBgTheme === 'paper'
-              ? 'text-stone-500'
-              : readerBgTheme === 'sepia'
-                ? 'text-[#7d5d3f]'
-                : 'text-zinc-500'
-            : 'text-slate-500 dark:text-gray-400';
-
-          const readerTitleColorClass = isReaderMode
-            ? readerBgTheme === 'paper'
-              ? 'text-stone-950'
-              : readerBgTheme === 'sepia'
-                ? 'text-[#2a1b0c]'
-                : 'text-white'
-            : 'text-slate-900 dark:text-white';
-
-          const titleSizeClass = isReaderMode
-            ? readerFontSize === 'md'
-              ? 'text-xl sm:text-2xl font-bold'
-              : readerFontSize === 'lg'
-                ? 'text-2xl sm:text-3xl font-extrabold'
-                : 'text-3xl sm:text-4xl font-black'
-            : 'text-xl sm:text-2xl font-extrabold';
-
-          const bodySizeClass = isReaderMode
-            ? `${readerFontFamily === 'serif' ? 'font-serif' : 'font-sans'} ${
-                readerFontSize === 'md'
-                  ? 'text-base sm:text-lg leading-relaxed'
-                  : readerFontSize === 'lg'
-                    ? 'text-lg sm:text-xl leading-loose'
-                    : 'text-xl sm:text-2xl leading-loose tracking-wide'
-              }`
-            : 'text-sm sm:text-base text-slate-600 dark:text-gray-300 leading-relaxed';
-
-          return (
-            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-              {/* Backdrop Close Click */}
-              <div
-                className="absolute inset-0 cursor-default"
-                onClick={() => {
-                  setSelectedArticleForPreview(null);
-                  setIsReaderMode(false);
-                }}
-              />
-
-              {/* Modal Body */}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                transition={{ type: 'spring', duration: 0.4 }}
-                className={`relative w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col z-10 max-h-[90vh] transition-all duration-300 border ${
-                  isReaderMode
-                    ? readerBgTheme === 'paper'
-                      ? 'bg-[#faf9f6] text-stone-900 border-stone-200'
-                      : readerBgTheme === 'sepia'
-                        ? 'bg-[#f8f1e5] text-[#3e2723] border-[#e5d4bc]'
-                        : 'bg-zinc-950 text-zinc-100 border-zinc-850'
-                    : 'bg-white dark:bg-gray-950 text-slate-900 dark:text-gray-100 border-slate-200 dark:border-gray-850'
-                }`}
-              >
-                {/* Scroll-spy Progress Bar */}
-                <div
-                  id="modal-scroll-spy"
-                  className="absolute top-0 left-0 right-0 h-[4px] bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-600 z-[999] origin-left transition-all duration-75"
-                  style={{ transform: `scaleX(${modalScrollProgress / 100})` }}
-                />
-
-                {/* Modal Header */}
-                <div className={`flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3 border-b shrink-0 ${readerHeaderBorderClass}`}>
-                  <div className="flex items-center justify-between w-full sm:w-auto">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-500 dark:text-gray-400">
-                        Ringkasan Berita
-                      </span>
-                      <span className="text-xs text-slate-300 dark:text-gray-600">|</span>
-                      <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                        {selectedArticleForPreview.sourceName}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setSelectedArticleForPreview(null);
-                        setIsReaderMode(false);
-                      }}
-                      className="sm:hidden rounded-full p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-gray-900 transition-all cursor-pointer"
-                      title="Tutup dialog"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-end sm:self-auto">
-                    {/* Mode Baca Toggle Button */}
-                    <button
-                      onClick={() => setIsReaderMode(!isReaderMode)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
-                        isReaderMode
-                          ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
-                          : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 dark:bg-gray-900 dark:border-gray-850 dark:text-gray-300 dark:hover:bg-gray-850'
-                      }`}
-                      title={isReaderMode ? "Matikan Mode Baca" : "Aktifkan Mode Baca"}
-                    >
-                      <BookOpen className="h-4 w-4" />
-                      <span>Mode Baca {isReaderMode ? 'Aktif' : 'Nonaktif'}</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setSelectedArticleForPreview(null);
-                        setIsReaderMode(false);
-                      }}
-                      className="hidden sm:block rounded-full p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-slate-50 dark:hover:bg-gray-900 transition-all cursor-pointer"
-                      title="Tutup dialog"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Reader Mode Settings Panel (Only when Reader Mode is Active) */}
-                {isReaderMode && (
-                  <div className={`px-6 py-3 border-b flex flex-wrap items-center justify-between gap-4 shrink-0 ${
-                    readerBgTheme === 'paper'
-                      ? 'bg-stone-100/50 border-stone-200/60'
-                      : readerBgTheme === 'sepia'
-                        ? 'bg-[#eedebf]/40 border-[#e5d4bc]'
-                        : 'bg-zinc-900/40 border-zinc-900'
-                  }`}>
-                    {/* Font Sizes */}
-                    <div className="flex items-center gap-2">
-                      <span className={`text-2xs font-bold uppercase tracking-wider ${readerSubTextClass}`}>Ukuran Font:</span>
-                      <div className={`flex items-center gap-1 rounded-lg p-0.5 border ${
-                        readerBgTheme === 'paper'
-                          ? 'bg-white border-stone-200'
-                          : readerBgTheme === 'sepia'
-                            ? 'bg-[#fdf9f2] border-[#e5d4bc]'
-                            : 'bg-zinc-950 border-zinc-800'
-                      }`}>
-                        {(['md', 'lg', 'xl'] as const).map((size) => (
-                          <button
-                            key={size}
-                            onClick={() => setReaderFontSize(size)}
-                            className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
-                              readerFontSize === size
-                                ? 'bg-indigo-600 text-white shadow-sm'
-                                : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800'
-                            }`}
-                          >
-                            {size === 'md' ? 'Kecil' : size === 'lg' ? 'Sedang' : 'Besar'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Font Family Selection */}
-                    <div className="flex items-center gap-2">
-                      <span className={`text-2xs font-bold uppercase tracking-wider ${readerSubTextClass}`}>Jenis Font:</span>
-                      <div className={`flex items-center gap-1 rounded-lg p-0.5 border ${
-                        readerBgTheme === 'paper'
-                          ? 'bg-white border-stone-200'
-                          : readerBgTheme === 'sepia'
-                            ? 'bg-[#fdf9f2] border-[#e5d4bc]'
-                            : 'bg-zinc-950 border-zinc-800'
-                      }`}>
-                        {(['serif', 'sans'] as const).map((font) => (
-                          <button
-                            key={font}
-                            onClick={() => setReaderFontFamily(font)}
-                            className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
-                              readerFontFamily === font
-                                ? 'bg-indigo-600 text-white shadow-sm'
-                                : 'text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-800'
-                            }`}
-                            style={{ fontFamily: font === 'serif' ? 'Georgia, serif' : 'Inter, sans-serif' }}
-                          >
-                            {font === 'serif' ? 'Serif' : 'Sans'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Color Themes */}
-                    <div className="flex items-center gap-2">
-                      <span className={`text-2xs font-bold uppercase tracking-wider ${readerSubTextClass}`}>Warna:</span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => setReaderBgTheme('paper')}
-                          title="Tema Kertas"
-                          className={`w-6 h-6 rounded-full border-2 transition-all flex items-center justify-center bg-[#faf9f6] text-stone-900 cursor-pointer ${
-                            readerBgTheme === 'paper' ? 'border-indigo-600 scale-110' : 'border-stone-300'
-                          }`}
-                        >
-                          <span className="text-[10px] font-bold font-sans">A</span>
-                        </button>
-                        <button
-                          onClick={() => setReaderBgTheme('sepia')}
-                          title="Tema Sepia"
-                          className={`w-6 h-6 rounded-full border-2 transition-all flex items-center justify-center bg-[#f8f1e5] text-[#3e2723] cursor-pointer ${
-                            readerBgTheme === 'sepia' ? 'border-indigo-600 scale-110' : 'border-[#d2be9f]'
-                          }`}
-                        >
-                          <span className="text-[10px] font-bold font-sans">A</span>
-                        </button>
-                        <button
-                          onClick={() => setReaderBgTheme('dark')}
-                          title="Tema Gelap"
-                          className={`w-6 h-6 rounded-full border-2 transition-all flex items-center justify-center bg-zinc-950 text-zinc-100 cursor-pointer ${
-                            readerBgTheme === 'dark' ? 'border-indigo-600 scale-110' : 'border-zinc-800'
-                          }`}
-                        >
-                          <span className="text-[10px] font-bold font-sans">A</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Modal Content */}
-                <div
-                  ref={modalScrollRef}
-                  onScroll={handleModalScroll}
-                  className="p-6 overflow-y-auto space-y-6 flex-1"
-                >
-                  {/* Meta details */}
-                  <div className={`flex items-center gap-2.5 text-2xs font-bold uppercase tracking-wider ${readerSubTextClass}`}>
-                    <span>{selectedArticleForPreview.sourceName}</span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {new Date(selectedArticleForPreview.publishedAt).toLocaleDateString('id-ID', {
-                        day: 'numeric',
-                        month: 'long',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                  </div>
-
-                  {/* Title */}
-                  <h2 className={`font-display leading-tight ${readerTitleColorClass} ${titleSizeClass}`}>
-                    {selectedArticleForPreview.title}
-                  </h2>
-
-                  {/* Article Banner Image */}
-                  <div className="w-full h-64 sm:h-80 md:h-96 rounded-2xl overflow-hidden bg-slate-100 dark:bg-gray-900 border border-slate-200/60 dark:border-zinc-800">
-                    <img
-                      src={selectedArticleForPreview.imageUrl || getArticleFallbackImage(sources.find(s => s.id === selectedArticleForPreview.feedSourceId)?.category)}
-                      alt={selectedArticleForPreview.title}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = getArticleFallbackImage(sources.find(s => s.id === selectedArticleForPreview.feedSourceId)?.category);
-                      }}
-                    />
-                  </div>
-
-                  {/* Summary Body (500-750 characters) */}
-                  <div className={`whitespace-pre-wrap ${bodySizeClass}`}>
-                    {selectedArticleForPreview.summary || 'Maaf, deskripsi berita lengkap tidak tersedia untuk artikel ini.'}
-                  </div>
-
-                  {/* Related News Section */}
-                  {relatedArticles.length > 0 && (
-                    <div className={`pt-6 border-t ${
-                      isReaderMode
-                        ? readerBgTheme === 'paper'
-                          ? 'border-stone-200'
-                          : readerBgTheme === 'sepia'
-                            ? 'border-[#ebdcc7]'
-                            : 'border-zinc-850'
-                        : 'border-slate-100 dark:border-gray-850'
-                    }`}>
-                      <h4 className={`text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5 ${
-                        isReaderMode
-                          ? readerBgTheme === 'paper'
-                            ? 'text-stone-800 font-serif'
-                            : readerBgTheme === 'sepia'
-                              ? 'text-[#3e2723] font-serif'
-                              : 'text-zinc-200'
-                          : 'text-slate-800 dark:text-gray-200'
-                      }`}>
-                        <TrendingUp className="h-4 w-4 text-indigo-500 animate-pulse" />
-                        <span>Berita Terkait</span>
-                      </h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        {relatedArticles.map((art) => (
-                          <div
-                            key={art.id}
-                            onClick={() => {
-                              handleArticleClick(art);
-                            }}
-                            className={`p-3 rounded-xl border text-left cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm ${
-                              isReaderMode
-                                ? readerBgTheme === 'paper'
-                                  ? 'bg-stone-50 border-stone-200 hover:bg-stone-100 text-stone-900'
-                                  : readerBgTheme === 'sepia'
-                                    ? 'bg-[#eedebf]/30 border-[#e5d4bc] hover:bg-[#eedebf]/50 text-[#3e2723]'
-                                    : 'bg-zinc-900 border-zinc-850 hover:bg-zinc-850 text-zinc-100'
-                                : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-800 dark:bg-gray-950 dark:border-gray-850 dark:hover:bg-gray-900 dark:text-gray-100'
-                            }`}
-                          >
-                            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 block mb-1">
-                              {art.sourceName}
-                            </span>
-                            <h5 className="text-xs font-semibold leading-snug line-clamp-2">
-                              {art.title}
-                            </h5>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* REQUIRED Statement / Jembatan disclaimer */}
-                  <div className={`p-4 rounded-xl border text-xs leading-relaxed space-y-1 ${
-                    isReaderMode
-                      ? readerBgTheme === 'paper'
-                        ? 'bg-stone-100/60 border-stone-200 text-stone-600'
-                        : readerBgTheme === 'sepia'
-                          ? 'bg-[#f1e6d4] border-[#ebdcc7] text-[#5d4037]'
-                          : 'bg-zinc-900/60 border-zinc-850 text-zinc-400'
-                      : 'bg-slate-50 dark:bg-gray-900/50 border-slate-150/60 dark:border-gray-850 text-slate-500 dark:text-gray-400'
-                  }`}>
-                    <div className={`font-bold flex items-center gap-1.5 ${
-                      isReaderMode
-                        ? readerBgTheme === 'paper'
-                          ? 'text-stone-800'
-                          : readerBgTheme === 'sepia'
-                            ? 'text-[#3e2723]'
-                            : 'text-zinc-200'
-                        : 'text-slate-700 dark:text-slate-300'
-                    }`}>
-                      <HelpCircle className="h-3.5 w-3.5 text-indigo-500" />
-                      Pernyataan Hak Cipta
-                    </div>
-                    <p>
-                      Situs ini hanya jembatan dan tidak mengklaim semua materi dari situs sumber. Hak cipta sepenuhnya dipegang oleh penerbit asli berita tersebut. Anda dapat melanjutkan membaca berita lengkap di platform mereka dengan mengeklik tautan di bawah ini.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Modal Footer Actions */}
-                <div className={`p-4 border-t flex items-center justify-end gap-3 shrink-0 ${
-                  isReaderMode
-                    ? readerBgTheme === 'paper'
-                      ? 'bg-stone-50 border-stone-200'
-                      : readerBgTheme === 'sepia'
-                        ? 'bg-[#f4ebd9] border-[#e5d4bc]'
-                        : 'bg-zinc-950 border-zinc-850'
-                    : 'bg-slate-50 dark:bg-gray-900/40 border-slate-100 dark:border-gray-850'
-                }`}>
-                  <button
-                    onClick={() => {
-                      setSelectedArticleForPreview(null);
-                      setIsReaderMode(false);
-                    }}
-                    className={`rounded-xl border text-xs font-bold px-4 py-2.5 transition-all cursor-pointer ${
-                      isReaderMode
-                        ? readerBgTheme === 'paper'
-                          ? 'border-stone-300 hover:bg-stone-100 text-stone-700'
-                          : readerBgTheme === 'sepia'
-                            ? 'border-[#d7c4a9] hover:bg-[#ebdcc7] text-[#5d4037]'
-                            : 'border-zinc-800 hover:bg-zinc-900 text-zinc-300'
-                        : 'border-slate-200 dark:border-gray-800 hover:bg-slate-100 dark:hover:bg-gray-850 text-slate-600 dark:text-gray-300'
-                    }`}
-                  >
-                    Tutup
-                  </button>
-                  <a
-                    href={selectedArticleForPreview.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 shadow-md hover:shadow-indigo-500/10 transition-all cursor-pointer"
-                  >
-                    <span>Kunjungi Situs Sumber</span>
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                </div>
-              </motion.div>
-            </div>
-          );
-        })()}
-      </AnimatePresence>
+      {/* Inline article detail view is used instead of the old preview modal */}
 
       {/* Live Score Toast Notifications */}
       <LiveScoreToast />

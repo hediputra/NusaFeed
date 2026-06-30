@@ -22,9 +22,9 @@ const DEFAULT_SOURCES: Omit<FeedSource, 'id' | 'createdAt' | 'lastFetchedAt'>[] 
     isActive: true,
   },
   {
-    name: 'Bola.net',
-    siteUrl: 'https://www.bola.net',
-    feedUrl: 'https://www.bola.net/feed/',
+    name: 'Sindonews Sports',
+    siteUrl: 'https://sports.sindonews.com',
+    feedUrl: 'https://sports.sindonews.com/rss',
     category: 'Sepak Bola',
     isActive: true,
   },
@@ -36,9 +36,9 @@ const DEFAULT_SOURCES: Omit<FeedSource, 'id' | 'createdAt' | 'lastFetchedAt'>[] 
     isActive: true,
   },
   {
-    name: 'Liputan6 Bola',
-    siteUrl: 'https://www.liputan6.com/bola',
-    feedUrl: 'https://www.liputan6.com/bola/rss',
+    name: 'Suara Bola',
+    siteUrl: 'https://www.suara.com/bola',
+    feedUrl: 'https://www.suara.com/rss/bola',
     category: 'Sepak Bola',
     isActive: true,
   },
@@ -83,6 +83,35 @@ export function initDb(): DBState {
         }));
         data.articles = []; // Clear old non-sports articles to start fresh
         saveDb(data);
+      } else {
+        // Automatically migrate old/broken feed URLs to high-quality active ones
+        let migrated = false;
+        data.feedSources = data.feedSources.map(s => {
+          if (s.feedUrl === 'https://www.bola.net/feed/' || s.name === 'Bola.net') {
+            migrated = true;
+            return {
+              ...s,
+              name: 'Sindonews Sports',
+              siteUrl: 'https://sports.sindonews.com',
+              feedUrl: 'https://sports.sindonews.com/rss',
+              category: 'Sepak Bola',
+            };
+          }
+          if (s.feedUrl === 'https://www.liputan6.com/bola/rss' || s.name === 'Liputan6 Bola') {
+            migrated = true;
+            return {
+              ...s,
+              name: 'Suara Bola',
+              siteUrl: 'https://www.suara.com/bola',
+              feedUrl: 'https://www.suara.com/rss/bola',
+              category: 'Sepak Bola',
+            };
+          }
+          return s;
+        });
+        if (migrated) {
+          saveDb(data);
+        }
       }
       
       // Ensure admin exists
@@ -186,6 +215,27 @@ export const db = {
     state.feedSources = state.feedSources.filter((s) => s.id !== id);
     state.articles = state.articles.filter((a) => a.feedSourceId !== id);
     saveDb(state);
+  },
+
+  deleteArticle: (id: string) => {
+    state = initDb();
+    state.articles = state.articles.filter((a) => a.id !== id);
+    saveDb(state);
+  },
+
+  addManualArticle: (article: Omit<Article, 'id' | 'createdAt' | 'hashId' | 'clicks'>) => {
+    state = initDb();
+    const hashId = crypto.createHash('sha256').update(article.link + '-' + Date.now()).digest('hex');
+    const fullArticle: Article = {
+      ...article,
+      id: generateId(),
+      hashId,
+      clicks: [],
+      createdAt: new Date().toISOString(),
+    };
+    state.articles.unshift(fullArticle); // Add to beginning so it ranks as terbaru
+    saveDb(state);
+    return fullArticle;
   },
 
   getArticles: () => {

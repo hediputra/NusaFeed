@@ -9,6 +9,48 @@ const parser = new Parser({
   timeout: 10000,
 });
 
+// Helper to fetch XML safely with customized browser headers and timeout handling
+async function fetchFeedXml(url: string, timeoutMs = 12000): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/rss+xml, application/rdf+xml, application/atom+xml, application/xml, text/xml, */*',
+        'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Connection': 'close',
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Status code ${response.status}`);
+    }
+
+    return await response.text();
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+// Helper to pre-process feed XML to fix invalid XML entity references and unescaped ampersands
+export function cleanXmlAmpersands(xml: string): string {
+  if (!xml) return '';
+  // 1. Replace any unescaped '&' with '&amp;'
+  // Matches any '&' not followed by a valid XML entity name and ';'
+  let clean = xml.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[a-fA-F0-9]+);)/g, '&amp;');
+  // 2. Replace HTML-only '&nbsp;' with standard XML numeric reference '&#160;'
+  clean = clean.replace(/&nbsp;/g, '&#160;');
+  return clean;
+}
+
 // Helper to strip HTML tags from a string
 export function stripHtml(html: string): string {
   if (!html) return '';
@@ -34,7 +76,9 @@ export async function fetchActiveFeeds(): Promise<{ totalFetched: number; result
   for (const source of sources) {
     try {
       console.log(`Fetching feed for: ${source.name} (${source.feedUrl})`);
-      const feed = await parser.parseURL(source.feedUrl);
+      const xmlText = await fetchFeedXml(source.feedUrl);
+      const cleanXml = cleanXmlAmpersands(xmlText);
+      const feed = await parser.parseString(cleanXml);
       
       const articlesToSave: Omit<Article, 'id' | 'createdAt'>[] = [];
       const items = feed.items || [];
@@ -183,7 +227,9 @@ export async function discoverFeedUrl(siteUrl: string): Promise<{ feedUrl: strin
 
           // Test if we can parse it
           try {
-            const testFeed = await parser.parseURL(discoveredUrl);
+            const xmlText = await fetchFeedXml(discoveredUrl);
+            const cleanXml = cleanXmlAmpersands(xmlText);
+            const testFeed = await parser.parseString(cleanXml);
             return {
               feedUrl: discoveredUrl,
               title: testFeed.title || new URL(url).hostname,
@@ -200,7 +246,9 @@ export async function discoverFeedUrl(siteUrl: string): Promise<{ feedUrl: strin
     for (const path of commonPaths) {
       try {
         const testUrl = new URL(path, url).toString();
-        const testFeed = await parser.parseURL(testUrl);
+        const xmlText = await fetchFeedXml(testUrl);
+        const cleanXml = cleanXmlAmpersands(xmlText);
+        const testFeed = await parser.parseString(cleanXml);
         return {
           feedUrl: testUrl,
           title: testFeed.title || new URL(url).hostname,
@@ -215,7 +263,9 @@ export async function discoverFeedUrl(siteUrl: string): Promise<{ feedUrl: strin
 
   // If input URL is already a parseable feed, return it directly
   try {
-    const directFeed = await parser.parseURL(url);
+    const xmlText = await fetchFeedXml(url);
+    const cleanXml = cleanXmlAmpersands(xmlText);
+    const directFeed = await parser.parseString(cleanXml);
     return {
       feedUrl: url,
       title: directFeed.title || new URL(url).hostname,

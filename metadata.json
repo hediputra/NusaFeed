@@ -1,6 +1,6 @@
 {
-  "name": "NusaFeed - Agregator & Jadwal Olahraga",
-  "description": "Portal agregator berita olahraga terlengkap di Indonesia dengan update jadwal, skor, serta liputan sepak bola, MotoGP, F1, tenis, futsal, dan olahraga lainnya secara real-time.",
+  "name": "OneNationPress Sport",
+  "description": "Portal berita olahraga terintegrasi terlengkap di Indonesia dengan update jadwal, skor, serta liputan sepak bola, MotoGP, F1, tenis, futsal, dan olahraga lainnya secara real-time.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

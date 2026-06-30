@@ -334,6 +334,47 @@ app.post('/api/articles/:id/click', (req, res) => {
   res.json({ success: true, article: updated });
 });
 
+// Admin: Add manually written article with rich text content
+app.post('/api/articles/manual', requireAdmin, (req, res) => {
+  const { title, summary, category, imageUrl, sourceName, sourceSiteUrl } = req.body;
+  if (!title || !summary || !category) {
+    return res.status(400).json({ success: false, error: 'Judul, konten berita, dan kategori wajib diisi.' });
+  }
+
+  try {
+    const publishedAt = new Date().toISOString();
+    const mockId = db.getArticles().length + 1;
+    const link = `https://onenationpress.com/articles/manual-${Date.now()}-${mockId}`;
+    
+    const newArticle = db.addManualArticle({
+      feedSourceId: 'manual',
+      sourceName: sourceName || 'Editorial OneNationPress Sport',
+      sourceSiteUrl: sourceSiteUrl || 'https://sports.sindonews.com', // default site
+      title,
+      summary, // WYSIWYG HTML content
+      category,
+      imageUrl: imageUrl || '',
+      link,
+      publishedAt,
+    });
+
+    res.json({ success: true, article: newArticle });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Gagal menyimpan berita manual.' });
+  }
+});
+
+// Admin: Delete an article by ID
+app.delete('/api/articles/:id', requireAdmin, (req, res) => {
+  const { id } = req.params;
+  try {
+    db.deleteArticle(id);
+    res.json({ success: true, message: 'Artikel berhasil dihapus.' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Gagal menghapus artikel.' });
+  }
+});
+
 // Admin: Get activity logs
 app.get('/api/logs', requireAdmin, (req, res) => {
   res.json({ success: true, logs: db.getLogs() });
@@ -406,16 +447,62 @@ function getGeminiClient() {
   return aiClient;
 }
 
-// Public: Summarize article using Gemini AI
+// Public: Summarize article using Biznet GIO AI or Gemini AI
 app.post('/api/summarize', async (req, res) => {
   const { title, summary } = req.body;
   if (!title) {
     return res.status(400).json({ success: false, error: 'Judul artikel wajib disertakan.' });
   }
 
+  const prompt = `Berikan ringkasan eksekutif berpoin (maksimal 3 poin singkat) dalam Bahasa Indonesia yang informatif untuk artikel berita berikut:\nJudul: ${title}\nRingkasan Awal: ${summary || 'Tidak ada ringkasan'}\n\nFormat output harus berupa elemen HTML daftar poin sederhana (<ul><li>...) agar rapi saat dirender di antarmuka situs berita. Pastikan bahasanya profesional dan objektif.`;
+
+  // Try Biznet GIO AI if the key is provided
+  const biznetKey = process.env.BIZNET_API_KEY;
+  if (biznetKey && biznetKey !== '' && biznetKey !== 'MY_BIZNET_API_KEY') {
+    try {
+      console.log('Menggunakan Biznet GIO AI untuk ringkasan...');
+      const baseUrl = process.env.BIZNET_API_BASE_URL || 'https://api.biznetgio.ai/v1';
+      const model = process.env.BIZNET_MODEL || 'openai/gpt-oss-20b';
+      
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${biznetKey}`
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.7
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Biznet API error (${response.status}): ${errText}`);
+      }
+
+      const data: any = await response.json();
+      const aiSummary = data?.choices?.[0]?.message?.content || '';
+      if (aiSummary) {
+        return res.json({ success: true, summary: aiSummary });
+      } else {
+        throw new Error('Biznet GIO AI mengembalikan respons kosong.');
+      }
+    } catch (biznetError: any) {
+      console.error('Gagal memanggil Biznet GIO AI, beralih ke fallback Gemini...', biznetError);
+    }
+  }
+
+  // Fallback to Gemini AI
   try {
+    console.log('Menggunakan Gemini AI untuk ringkasan...');
     const ai = getGeminiClient();
-    const prompt = `Berikan ringkasan eksekutif berpoin (maksimal 3 poin singkat) dalam Bahasa Indonesia yang informatif untuk artikel berita berikut:\nJudul: ${title}\nRingkasan Awal: ${summary || 'Tidak ada ringkasan'}\n\nFormat output harus berupa elemen HTML daftar poin sederhana (<ul><li>...) agar rapi saat dirender di antarmuka situs berita. Pastikan bahasanya profesional dan objektif.`;
     
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -428,7 +515,7 @@ app.post('/api/summarize', async (req, res) => {
     console.error('Gemini summary error:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Gagal terhubung ke Gemini API. Pastikan API Key dikonfigurasi dengan benar di panel pengaturan.'
+      error: error.message || 'Gagal terhubung ke AI Engine. Pastikan API Key dikonfigurasi dengan benar di panel pengaturan.'
     });
   }
 });

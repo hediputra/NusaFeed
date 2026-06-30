@@ -32,7 +32,7 @@ export function getRelativeTime(dateString: string): string {
   }
 }
 
-export function updateSEO(title: string, description: string) {
+export function updateSEO(title: string, description: string, imageUrl?: string) {
   // Update browser title
   document.title = title;
 
@@ -54,30 +54,36 @@ export function updateSEO(title: string, description: string) {
   // Open Graph
   setMeta('og:title', title, true);
   setMeta('og:description', description, true);
-  setMeta('og:type', 'website', true);
+  setMeta('og:type', imageUrl ? 'article' : 'website', true);
   setMeta('og:url', window.location.href, true);
-  setMeta('og:site_name', 'NusaFeed', true);
+  setMeta('og:site_name', 'OneNationPress Sport', true);
+  if (imageUrl) {
+    setMeta('og:image', imageUrl, true);
+  }
 
   // Twitter Card
   setMeta('twitter:card', 'summary_large_image');
   setMeta('twitter:title', title);
   setMeta('twitter:description', description);
+  if (imageUrl) {
+    setMeta('twitter:image', imageUrl);
+  }
 }
 
-export function injectSchemaOrg(articles: any[]) {
+export function injectSchemaOrg(articles: any[], activeArticle?: any) {
   // Clean up any existing JSON-LD script
-  const existingScript = document.getElementById('nusafeed-schema');
+  const existingScript = document.getElementById('onenationpress-schema') || document.getElementById('nusafeed-schema');
   if (existingScript) {
     existingScript.remove();
   }
 
-  // Create standard schema
-  const schema: any = {
+  // Create standard website/feed schema
+  const websiteSchema: any = {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
-    'name': 'NusaFeed - Agregator & Jadwal Olahraga',
+    'name': 'OneNationPress Sport',
     'url': window.location.origin,
-    'description': 'Agregator berita dan jadwal olahraga nasional serta internasional terlengkap, tercepat, dan mandiri.',
+    'description': 'Portal Berita Olahraga Terintegrasi terlengkap, tercepat, dan mandiri dengan update berita olahraga terkini, jadwal, klasemen, dan live score real-time.',
     'potentialAction': {
       '@type': 'SearchAction',
       'target': `${window.location.origin}/?search={search_term_string}`,
@@ -85,9 +91,8 @@ export function injectSchemaOrg(articles: any[]) {
     },
   };
 
-  // If we have articles, add them as part of a NewsMediaOrganization / Feed list
   if (articles && articles.length > 0) {
-    schema.hasPart = articles.slice(0, 10).map((art) => ({
+    websiteSchema.hasPart = articles.slice(0, 10).map((art) => ({
       '@type': 'NewsArticle',
       'headline': art.title,
       'description': art.summary,
@@ -99,7 +104,7 @@ export function injectSchemaOrg(articles: any[]) {
       },
       'publisher': {
         '@type': 'Organization',
-        'name': 'NusaFeed',
+        'name': 'OneNationPress Sport',
         'logo': {
           '@type': 'ImageObject',
           'url': `${window.location.origin}/logo.png`,
@@ -108,10 +113,45 @@ export function injectSchemaOrg(articles: any[]) {
     }));
   }
 
+  // Create BreadcrumbList Schema
+  const breadcrumbElements = [
+    {
+      '@type': 'ListItem',
+      'position': 1,
+      'name': 'Beranda',
+      'item': window.location.origin,
+    }
+  ];
+
+  if (activeArticle) {
+    const category = activeArticle.category || 'Olahraga';
+    breadcrumbElements.push({
+      '@type': 'ListItem',
+      'position': 2,
+      'name': category,
+      'item': `${window.location.origin}/?category=${encodeURIComponent(category.toLowerCase())}`,
+    });
+    breadcrumbElements.push({
+      '@type': 'ListItem',
+      'position': 3,
+      'name': activeArticle.title,
+      'item': activeArticle.link || `${window.location.origin}/article/${activeArticle.id}`,
+    });
+  }
+
+  const breadcrumbSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    'itemListElement': breadcrumbElements,
+  };
+
+  // We can inject them as an array of schemas in application/ld+json
+  const schemaGraph = [websiteSchema, breadcrumbSchema];
+
   const script = document.createElement('script');
-  script.id = 'nusafeed-schema';
+  script.id = 'onenationpress-schema';
   script.type = 'application/ld+json';
-  script.text = JSON.stringify(schema);
+  script.text = JSON.stringify(schemaGraph);
   document.head.appendChild(script);
 }
 

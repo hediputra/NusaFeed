@@ -3,6 +3,7 @@ import { ExternalLink, Clock, Share2, Check, Bookmark, Flame } from 'lucide-reac
 import { motion } from 'motion/react';
 import { Article } from '../types.ts';
 import { getRelativeTime, getArticleFallbackImage } from '../utils.ts';
+import NextGenImage from './NextGenImage.tsx';
 
 interface ArticleCardProps {
   article: Article;
@@ -114,14 +115,13 @@ export default function ArticleCard({
       >
         {/* Left Side: Thumbnail cover image */}
         <div className="relative w-20 h-20 sm:w-28 sm:h-24 shrink-0 overflow-hidden rounded-lg bg-slate-100 dark:bg-gray-900">
-          <img
+          <NextGenImage
             src={article.imageUrl || getArticleFallbackImage(category)}
             alt={article.title}
             referrerPolicy="no-referrer"
+            loading="lazy"
+            fallbackSrc={getArticleFallbackImage(category)}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-106"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = getArticleFallbackImage(category);
-            }}
           />
           {isTrending && (
             <div className="absolute top-1 left-1 bg-gradient-to-r from-amber-500 to-rose-600 text-white text-[8px] font-bold uppercase px-1.5 py-0.5 rounded shadow flex items-center gap-0.5 animate-pulse">
@@ -142,6 +142,7 @@ export default function ArticleCard({
                     src={faviconUrl}
                     alt={article.sourceName}
                     referrerPolicy="no-referrer"
+                    loading="lazy"
                     className="h-4 w-4 rounded bg-slate-50 dark:bg-gray-800 p-0.5 object-contain border border-slate-100 dark:border-gray-800 shrink-0"
                     onError={(e) => {
                       (e.target as HTMLImageElement).src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%236366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4c0-.5.2-1 .6-1.4C5 2.2 5.5 2 6 2h12c.5 0 1 .2 1.4.6.4.4.6.9.6 1.4v18l-8-4-8 4z"/></svg>';
@@ -236,14 +237,13 @@ export default function ArticleCard({
         <div className={`relative w-full overflow-hidden rounded-xl mb-4 bg-slate-100 dark:bg-gray-900 ${
           isFeatured ? 'h-52 sm:h-60 md:h-68' : 'h-40 sm:h-44'
         }`}>
-          <img
+          <NextGenImage
             src={article.imageUrl || getArticleFallbackImage(category)}
             alt={article.title}
             referrerPolicy="no-referrer"
+            loading="lazy"
+            fallbackSrc={getArticleFallbackImage(category)}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-106"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = getArticleFallbackImage(category);
-            }}
           />
           {/* Trending Badge Overlay */}
           {isTrending && (
@@ -262,6 +262,7 @@ export default function ArticleCard({
                 src={faviconUrl}
                 alt={article.sourceName}
                 referrerPolicy="no-referrer"
+                loading="lazy"
                 className={`h-5.5 w-5.5 rounded bg-slate-50 dark:bg-gray-800 p-0.5 object-contain border ${
                   isFeatured ? 'border-slate-800' : 'border-slate-100 dark:border-gray-800'
                 }`}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Lock, Key, SlidersHorizontal, Plus, FileText, RefreshCw, Trash2, Edit, AlertTriangle, CheckCircle, Search, HelpCircle, ArrowLeft, ToggleLeft, ToggleRight, Pause, Play, Sparkles
+  Lock, Key, SlidersHorizontal, Plus, FileText, RefreshCw, Trash2, Edit, AlertTriangle, CheckCircle, Search, HelpCircle, ArrowLeft, ToggleLeft, ToggleRight, Pause, Play, Sparkles, Upload, ImageIcon, BookOpen
 } from 'lucide-react';
 import { FeedSource, ActivityLog } from '../types.ts';
 
@@ -10,6 +10,7 @@ interface AdminPanelProps {
   onLogout: () => void;
   sources: FeedSource[];
   fetchSources: () => Promise<void>;
+  fetchArticles?: () => Promise<void>;
 }
 
 export default function AdminPanel({
@@ -18,6 +19,7 @@ export default function AdminPanel({
   onLogout,
   sources,
   fetchSources,
+  fetchArticles,
 }: AdminPanelProps) {
   // Login Form States
   const [username, setUsername] = useState('');
@@ -26,7 +28,7 @@ export default function AdminPanel({
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Panel Tabs
-  const [activeTab, setActiveTab] = useState<'sources' | 'add' | 'logs'>('sources');
+  const [activeTab, setActiveTab] = useState<'sources' | 'add' | 'write' | 'logs'>('sources');
 
   // Manual Add / Edit States
   const [isEditing, setIsEditing] = useState<string | null>(null); // holds source ID if editing
@@ -37,6 +39,21 @@ export default function AdminPanel({
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Write Manual Article States
+  const [writeTitle, setWriteTitle] = useState('');
+  const [writeCategory, setWriteCategory] = useState('Sepak Bola');
+  const [writeContent, setWriteContent] = useState(''); // WYSIWYG editor content
+  const [writeImageUrl, setWriteImageUrl] = useState('');
+  const [writeSourceName, setWriteSourceName] = useState('Editorial OneNationPress Sport');
+  const [writeSourceSiteUrl, setWriteSourceSiteUrl] = useState('https://onenationpress.com');
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const [writeSuccess, setWriteSuccess] = useState<string | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [editorMode, setEditorMode] = useState<'visual' | 'code'>('visual');
+
+  const [manualArticles, setManualArticles] = useState<any[]>([]);
+  const [isLoadingManual, setIsLoadingManual] = useState(false);
 
   // Auto-Discovery States
   const [discoverUrl, setDiscoverUrl] = useState('');
@@ -73,11 +90,163 @@ export default function AdminPanel({
     }
   };
 
+  // Fetch manual articles list
+  const fetchManualArticles = async () => {
+    setIsLoadingManual(true);
+    try {
+      const response = await fetch('/api/articles');
+      const data = await response.json();
+      if (data.success) {
+        const manual = data.articles.filter((a: any) => a.feedSourceId === 'manual');
+        setManualArticles(manual);
+      }
+    } catch (err) {
+      console.error('Gagal mengambil berita manual:', err);
+    } finally {
+      setIsLoadingManual(false);
+    }
+  };
+
+  // Delete a manual article
+  const handleDeleteManualArticle = async (id: string, title: string) => {
+    if (!token) return;
+    if (!confirm(`Apakah Anda yakin ingin menghapus berita "${title}"?`)) return;
+
+    try {
+      const response = await fetch(`/api/articles/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (data.success) {
+        await fetchManualArticles();
+        if (fetchArticles) {
+          await fetchArticles(); // update main feed in parent component
+        }
+      } else {
+        alert(data.error || 'Gagal menghapus berita.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Terjadi kesalahan saat menghapus.');
+    }
+  };
+
+  // Image Upload handler with canvas resizing to prevent db bloat
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 900;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          setWriteImageUrl(compressedBase64);
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handle manual news publishing submission
+  const handlePublishArticle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWriteError(null);
+    setWriteSuccess(null);
+    setIsPublishing(true);
+
+    if (!writeTitle.trim()) {
+      setWriteError('Judul berita wajib diisi.');
+      setIsPublishing(false);
+      return;
+    }
+    if (!writeContent.trim()) {
+      setWriteError('Konten berita olahraga wajib diisi.');
+      setIsPublishing(false);
+      return;
+    }
+
+    // Google News quality criteria checks
+    const plainText = writeContent.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+    if (writeTitle.trim().length < 20) {
+      setWriteError('Kualitas Konten Rendah: Judul berita minimal 20 karakter untuk standar penulisan Google News.');
+      setIsPublishing(false);
+      return;
+    }
+    if (plainText.length < 150) {
+      setWriteError('Kualitas Konten Rendah: Isi berita terlalu pendek (minimal 150 karakter teks murni) agar layak diindeks Google News.');
+      setIsPublishing(false);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/articles/manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: writeTitle,
+          summary: writeContent,
+          category: writeCategory,
+          imageUrl: writeImageUrl,
+          sourceName: writeSourceName,
+          sourceSiteUrl: writeSourceSiteUrl,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setWriteSuccess('Berita olahraga berhasil dipublikasikan secara langsung!');
+        setWriteTitle('');
+        setWriteContent('');
+        setWriteImageUrl('');
+        
+        // Clear visual editor area HTML content
+        const wysiwyg = document.getElementById('wysiwyg-editor-area');
+        if (wysiwyg) {
+          wysiwyg.innerHTML = '';
+        }
+
+        await fetchManualArticles();
+        if (fetchArticles) {
+          await fetchArticles(); // update main feed
+        }
+      } else {
+        setWriteError(data.error || 'Gagal mempublikasikan berita.');
+      }
+    } catch (err: any) {
+      setWriteError(err.message || 'Terjadi kesalahan saat menyimpan.');
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
   useEffect(() => {
     if (token) {
       fetchSources();
       if (activeTab === 'logs') {
         fetchLogs();
+      } else if (activeTab === 'write') {
+        fetchManualArticles();
       }
     }
   }, [token, activeTab]);
@@ -391,7 +560,7 @@ export default function AdminPanel({
       <div id="admin-header" className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
         <div>
           <h2 className="font-display text-2xl font-bold tracking-tight text-gray-950 dark:text-white">
-            Dashboard Pengelolaan NusaFeed
+            Dashboard Pengelolaan OneNationPress Sport
           </h2>
           <p className="text-gray-500 dark:text-gray-400 text-sm">
             Selamat datang, Administrator. Kelola sumber berita, pantau log, atau picu sinkronisasi manual.
@@ -463,6 +632,19 @@ export default function AdminPanel({
         >
           <Plus className="h-4 w-4" />
           <span>{isEditing ? 'Edit Sumber Berita' : 'Tambah Sumber / Auto-Discover'}</span>
+        </button>
+
+        <button
+          id="tab-btn-write"
+          onClick={() => { setActiveTab('write'); fetchManualArticles(); }}
+          className={`flex items-center gap-1.5 py-3 px-4 text-sm font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'write'
+              ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+              : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+          }`}
+        >
+          <BookOpen className="h-4 w-4" />
+          <span>Buat Berita Baru</span>
         </button>
 
         <button
@@ -773,6 +955,436 @@ export default function AdminPanel({
         </div>
       )}
 
+      {/* Content for TAB: Write Manual Article */}
+      {activeTab === 'write' && (() => {
+        const getPlainText = (html: string) => {
+          if (!html) return '';
+          return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+        };
+
+        const titleLength = writeTitle.trim().length;
+        const titleWords = writeTitle.trim().split(/\s+/).filter(Boolean).length;
+
+        const plainTextContent = getPlainText(writeContent);
+        const contentLength = plainTextContent.length;
+        const contentWords = plainTextContent.split(/\s+/).filter(Boolean).length;
+
+        return (
+          <div id="manual-article-editor-view" className="space-y-8 animate-fade-in">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* Form Column */}
+              <div className="lg:col-span-8 space-y-6">
+                <div className="rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-950 shadow-sm">
+                  <h3 className="font-display font-bold text-gray-950 dark:text-white text-lg mb-4 flex items-center gap-2">
+                    <BookOpen className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Tulis & Unggah Berita Olahraga Mandiri</span>
+                  </h3>
+
+                  <form id="publish-article-form" onSubmit={handlePublishArticle} className="space-y-4">
+                    <div>
+                      <label htmlFor="write-title-input" className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wider flex justify-between">
+                        <span>Judul Berita Olahraga *</span>
+                        <span className="text-3xs text-gray-400 font-normal">Disarankan 30 - 90 karakter</span>
+                      </label>
+                      <input
+                        id="write-title-input"
+                        type="text"
+                        required
+                        placeholder="Contoh: Timnas Indonesia Menang Telak 3-0 Melawan Arab Saudi"
+                        value={writeTitle}
+                        onChange={(e) => setWriteTitle(e.target.value)}
+                        className={`w-full rounded-lg border bg-white py-2.5 px-4 text-sm outline-none transition-all dark:bg-gray-950 dark:text-white ${
+                          writeTitle.trim() === ''
+                            ? 'border-gray-200 focus:border-indigo-500 dark:border-gray-800'
+                            : titleLength < 20
+                            ? 'border-red-500 focus:border-red-500 dark:border-red-950/60'
+                            : titleLength < 30
+                            ? 'border-amber-400 focus:border-amber-500 dark:border-amber-950/60'
+                            : titleLength <= 90
+                            ? 'border-emerald-500 focus:border-emerald-600 dark:border-emerald-950/60'
+                            : 'border-amber-500 focus:border-amber-600 dark:border-amber-950/60'
+                        }`}
+                      />
+                      <div className="flex items-center justify-between mt-1 px-1 text-2xs">
+                        <span className={
+                          writeTitle.trim() === ''
+                            ? 'text-gray-400'
+                            : titleLength < 20
+                            ? 'text-red-500 font-semibold'
+                            : titleLength < 30
+                            ? 'text-amber-500 font-semibold'
+                            : titleLength <= 90
+                            ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                            : 'text-amber-600 dark:text-amber-400 font-semibold'
+                        }>
+                          {writeTitle.trim() === ''
+                            ? 'Belum ada judul.'
+                            : titleLength < 20
+                            ? '⚠️ Judul terlalu pendek untuk standar Google News (Min. 20 kar.)'
+                            : titleLength < 30
+                            ? '⚠️ Judul agak pendek (Disarankan 30-90 kar.)'
+                            : titleLength <= 90
+                            ? '✓ Judul sangat optimal & ideal untuk Google News!'
+                            : '⚠️ Judul agak panjang (Disarankan tidak melebihi 90 kar.)'}
+                        </span>
+                        <span className="text-gray-400 font-mono">
+                          {titleLength} kar / {titleWords} kata
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="write-category-select" className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wider">
+                          Kategori Olahraga *
+                        </label>
+                        <select
+                          id="write-category-select"
+                          value={writeCategory}
+                          onChange={(e) => setWriteCategory(e.target.value)}
+                          className="w-full rounded-lg border border-gray-200 bg-white py-2.5 px-3 text-sm outline-none focus:border-indigo-500 dark:border-gray-800 dark:bg-gray-950 dark:text-white"
+                        >
+                          <option value="Sepak Bola">Sepak Bola</option>
+                          <option value="MotoGP">MotoGP</option>
+                          <option value="F1">F1</option>
+                          <option value="Tenis">Tenis</option>
+                          <option value="Futsal">Futsal</option>
+                          <option value="Bulutangkis">Bulutangkis</option>
+                          <option value="Basket">Basket</option>
+                          <option value="Lainnya">Lainnya</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label htmlFor="write-source-name-input" className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wider">
+                          Nama Penulis / Redaksi
+                        </label>
+                        <input
+                          id="write-source-name-input"
+                          type="text"
+                          placeholder="Redaksi OneNationPress"
+                          value={writeSourceName}
+                          onChange={(e) => setWriteSourceName(e.target.value)}
+                          className="w-full rounded-lg border border-gray-200 bg-white py-2.5 px-3 text-sm outline-none focus:border-indigo-500 dark:border-gray-800 dark:bg-gray-950 dark:text-white"
+                        />
+                      </div>
+                    </div>
+
+                    {/* WYSIWYG Editor */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wider flex justify-between">
+                        <span>Isi Berita Lengkap (Rich Text WYSIWYG Editor) *</span>
+                        <span className="text-3xs text-gray-400 font-normal">Min. 150 karakter teks murni</span>
+                      </label>
+                      <div className={`rounded-xl overflow-hidden border ${
+                        writeContent.trim() === ''
+                          ? 'border-gray-200 dark:border-gray-800'
+                          : contentLength < 150
+                          ? 'border-red-400 focus-within:border-red-500 dark:border-red-950'
+                          : contentLength < 400
+                          ? 'border-amber-400 focus-within:border-amber-500 dark:border-amber-950'
+                          : 'border-emerald-500 focus-within:border-emerald-600 dark:border-emerald-950'
+                      }`}>
+                        <RichTextEditor
+                          value={writeContent}
+                          onChange={setWriteContent}
+                          mode={editorMode}
+                          setMode={setEditorMode}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between mt-1 px-1 text-2xs">
+                        <span className={
+                          writeContent.trim() === ''
+                            ? 'text-gray-400'
+                            : contentLength < 150
+                            ? 'text-red-500 font-semibold'
+                            : contentLength < 400
+                            ? 'text-amber-500 font-semibold'
+                            : 'text-emerald-600 dark:text-emerald-400 font-semibold'
+                        }>
+                          {writeContent.trim() === ''
+                            ? 'Konten belum ditulis.'
+                            : contentLength < 150
+                            ? '⚠️ Terlalu pendek untuk standar Google News (Min. 150 kar.)'
+                            : contentLength < 400
+                            ? '⚠️ Berita agak ringkas (Direkomendasikan > 400 kar. agar lebih mendalam)'
+                            : '✓ Kedalaman konten sangat baik untuk kelayakan indeksasi Google News!'}
+                        </span>
+                        <span className="text-gray-400 font-mono">
+                          {contentLength} kar / {contentWords} kata
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Image Upload Zone */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5 uppercase tracking-wider">
+                        Foto Sampul Berita (Gambar Pendukung)
+                      </label>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Drag & Drop Upload Block */}
+                        <div className="border-2 border-dashed border-gray-200 dark:border-gray-850 rounded-xl p-4 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-950/30 hover:bg-gray-50 dark:hover:bg-gray-950/50 transition-all relative">
+                          <input
+                            id="cover-file-upload"
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <Upload className="h-6 w-6 text-gray-400 mb-2" />
+                          <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Pilih / Seret Foto</span>
+                          <span className="text-3xs text-gray-400 mt-1">Format JPG, PNG (Kompresi otomatis)</span>
+                        </div>
+
+                        {/* URL input Block */}
+                        <div className="flex flex-col justify-center space-y-2">
+                          <span className="text-3xs font-bold text-gray-400 dark:text-gray-500 uppercase">Atau masukkan URL gambar langsung</span>
+                          <input
+                            id="write-image-url-input"
+                            type="text"
+                            placeholder="https://example.com/images/bola.jpg"
+                            value={writeImageUrl.startsWith('data:') ? '' : writeImageUrl}
+                            onChange={(e) => setWriteImageUrl(e.target.value)}
+                            className="w-full rounded-lg border border-gray-200 bg-white py-2 px-3 text-xs outline-none focus:border-indigo-500 dark:border-gray-800 dark:bg-gray-950 dark:text-white"
+                          />
+                          {writeImageUrl.startsWith('data:') && (
+                            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-2xs font-semibold">
+                              <CheckCircle className="h-3 w-3" />
+                              <span>Gambar berhasil diunggah langsung!</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Image Preview Block */}
+                      {writeImageUrl && (
+                        <div className="mt-3 relative w-full max-w-md h-36 rounded-xl overflow-hidden border border-gray-100 dark:border-gray-850">
+                          <img src={writeImageUrl} alt="Preview Sampul" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <button
+                            type="button"
+                            onClick={() => setWriteImageUrl('')}
+                            className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition-all"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {writeError && (
+                      <div id="write-error-banner" className="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-red-600 dark:bg-red-950/30 dark:text-red-400 text-xs">
+                        <AlertTriangle className="h-4.5 w-4.5 shrink-0" />
+                        <span>{writeError}</span>
+                      </div>
+                    )}
+
+                    {writeSuccess && (
+                      <div id="write-success-banner" className="flex items-start gap-2 rounded-lg bg-emerald-50 p-3 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400 text-xs">
+                        <CheckCircle className="h-4.5 w-4.5 shrink-0" />
+                        <span>{writeSuccess}</span>
+                      </div>
+                    )}
+
+                    <button
+                      id="publish-submit-btn"
+                      type="submit"
+                      disabled={isPublishing}
+                      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 py-3 text-sm font-bold text-white shadow-md shadow-indigo-500/15 transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <span>{isPublishing ? 'Mempublikasikan Berita...' : 'Publikasikan Berita Olahraga Sekarang'}</span>
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              {/* Quality Compliance Score & Existing Manual Articles */}
+              <div className="lg:col-span-4 space-y-6">
+                {/* Google News Real-time Quality Checker Card */}
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-950 shadow-sm space-y-4">
+                  <h4 className="font-display font-bold text-gray-950 dark:text-white text-sm flex items-center gap-1.5">
+                    <Sparkles className="h-4.5 w-4.5 text-amber-500 animate-pulse" />
+                    <span>Pemeriksa Kualitas Berita</span>
+                  </h4>
+                  <p className="text-gray-500 dark:text-gray-400 text-2xs leading-relaxed">
+                    Analisis real-time ini memastikan artikel Anda memenuhi kriteria dan kebijakan kelayakan Google News & Discover.
+                  </p>
+
+                  <div className="space-y-3.5 border-t border-gray-100 dark:border-gray-900 pt-3">
+                    {/* Title check */}
+                    <div className="flex items-start gap-2.5">
+                      <span className={`mt-0.5 rounded-full p-0.5 flex items-center justify-center shrink-0 ${
+                        titleLength >= 30 && titleLength <= 90
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : titleLength >= 20
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                          : 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400'
+                      }`}>
+                        {titleLength >= 20 ? (
+                          titleLength >= 30 && titleLength <= 90 ? (
+                            <CheckCircle className="h-4 w-4" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4" />
+                          )
+                        ) : (
+                          <AlertTriangle className="h-4 w-4" />
+                        )}
+                      </span>
+                      <div className="text-xs">
+                        <p className="font-semibold text-gray-900 dark:text-white">Kelayakan Judul</p>
+                        <p className="text-gray-500 dark:text-gray-400 text-3xs mt-0.5">
+                          {titleLength === 0 ? 'Belum diisi' : `${titleLength} karakter (${titleWords} kata)`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Content check */}
+                    <div className="flex items-start gap-2.5">
+                      <span className={`mt-0.5 rounded-full p-0.5 flex items-center justify-center shrink-0 ${
+                        contentLength >= 400
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : contentLength >= 150
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                          : 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400'
+                      }`}>
+                        {contentLength >= 150 ? (
+                          contentLength >= 400 ? (
+                            <CheckCircle className="h-4 w-4" />
+                          ) : (
+                            <AlertTriangle className="h-4 w-4" />
+                          )
+                        ) : (
+                          <AlertTriangle className="h-4 w-4" />
+                        )}
+                      </span>
+                      <div className="text-xs">
+                        <p className="font-semibold text-gray-900 dark:text-white">Kepadatan Konten</p>
+                        <p className="text-gray-500 dark:text-gray-400 text-3xs mt-0.5">
+                          {contentLength === 0 ? 'Belum diisi' : `${contentLength} karakter (${contentWords} kata)`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Image check */}
+                    <div className="flex items-start gap-2.5">
+                      <span className={`mt-0.5 rounded-full p-0.5 flex items-center justify-center shrink-0 ${
+                        writeImageUrl
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                      }`}>
+                        {writeImageUrl ? (
+                          <CheckCircle className="h-4 w-4" />
+                        ) : (
+                          <AlertTriangle className="h-4 w-4" />
+                        )}
+                      </span>
+                      <div className="text-xs">
+                        <p className="font-semibold text-gray-900 dark:text-white">Visual Pendukung</p>
+                        <p className="text-gray-500 dark:text-gray-400 text-3xs mt-0.5">
+                          {writeImageUrl ? 'Foto sampul aktif' : 'Tanpa gambar pendukung'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* General Warning Alerts */}
+                  {(titleLength < 20 || contentLength < 150) && (
+                    <div className="rounded-xl bg-red-50/50 dark:bg-red-950/15 p-3 border border-red-200/50 dark:border-red-900/30">
+                      <div className="flex gap-2 text-2xs text-red-700 dark:text-red-400">
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
+                        <div>
+                          <p className="font-bold">Kualitas Belum Layak Terbit</p>
+                          <p className="mt-1 leading-relaxed text-3xs">
+                            Isi minimal 20 karakter judul dan 150 karakter konten berita agar tombol publikasi dapat diproses dengan sukses.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {titleLength >= 20 && titleLength < 30 && contentLength >= 150 && (
+                    <div className="rounded-xl bg-amber-50/50 dark:bg-amber-950/15 p-3 border border-amber-200/50 dark:border-amber-900/30">
+                      <div className="flex gap-2 text-2xs text-amber-800 dark:text-amber-300">
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                        <div>
+                          <p className="font-bold">Kualitas Cukup Terpenuhi</p>
+                          <p className="mt-1 leading-relaxed text-3xs">
+                            Persyaratan dasar terpenuhi, namun disarankan memperpanjang judul hingga 30 karakter untuk meminimalkan penalti SEO Google.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {titleLength >= 30 && titleLength <= 90 && contentLength >= 400 && writeImageUrl && (
+                    <div className="rounded-xl bg-emerald-50/50 dark:bg-emerald-950/15 p-3 border border-emerald-200/50 dark:border-emerald-900/30 animate-pulse">
+                      <div className="flex gap-2 text-2xs text-emerald-800 dark:text-emerald-300">
+                        <CheckCircle className="h-4 w-4 shrink-0 mt-0.5 text-emerald-500" />
+                        <div>
+                          <p className="font-bold">Berita Sangat Berkualitas!</p>
+                          <p className="mt-1 leading-relaxed text-3xs">
+                            Format dan struktur konten sangat ideal. Berita ini sangat siap bersaing di laman utama Google News & Discover.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-950 shadow-sm">
+                  <h4 className="font-display font-bold text-gray-950 dark:text-white text-sm mb-3">
+                    Kelola Berita Unggahan Mandiri ({manualArticles.length})
+                  </h4>
+                  <p className="text-gray-500 dark:text-gray-400 text-xs leading-relaxed mb-4">
+                    Daftar di bawah ini menampilkan seluruh berita yang Anda buat secara mandiri. Anda dapat memantau atau menghapusnya kapan saja.
+                  </p>
+
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                    {isLoadingManual ? (
+                      <div className="text-center py-8 text-xs text-gray-400">
+                        Memuat rincian berita...
+                      </div>
+                    ) : manualArticles.length === 0 ? (
+                      <div className="text-center py-8 text-xs text-gray-400 border border-dashed border-gray-100 dark:border-gray-900 rounded-xl">
+                        Belum ada berita mandiri yang diunggah.
+                      </div>
+                    ) : (
+                      manualArticles.map((art) => (
+                        <div key={art.id} className="p-3 bg-gray-50 dark:bg-gray-900/50 hover:bg-gray-100 dark:hover:bg-gray-900/80 rounded-xl border border-gray-100 dark:border-gray-900/50 flex flex-col justify-between gap-2.5 transition-all">
+                          <div className="min-w-0">
+                            <span className="inline-block text-[9px] font-bold text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded mb-1.5">
+                              {art.category || 'Olahraga'}
+                            </span>
+                            <h5 className="font-semibold text-xs text-gray-900 dark:text-white line-clamp-2 leading-snug">
+                              {art.title}
+                            </h5>
+                            <span className="text-[10px] text-gray-400 dark:text-gray-500 block mt-1">
+                              {new Date(art.publishedAt).toLocaleDateString('id-ID')}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-1.5 border-t border-gray-150/40 dark:border-gray-800/40 pt-2 mt-1">
+                            <button
+                              id={`delete-manual-btn-${art.id}`}
+                              onClick={() => handleDeleteManualArticle(art.id, art.title)}
+                              className="flex items-center gap-1 text-[10px] font-bold text-red-600 hover:text-red-700 bg-red-50 dark:bg-red-950/20 dark:text-red-400 p-1.5 rounded transition-all cursor-pointer"
+                              title="Hapus berita"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              <span>Hapus Berita</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Content for TAB: Activity Logs */}
       {activeTab === 'logs' && (
         <div id="logs-view" className="space-y-4">
@@ -836,6 +1448,205 @@ export default function AdminPanel({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Custom Rich Text WYSIWYG Editor with standard browser formatting commands
+function RichTextEditor({
+  value,
+  onChange,
+  mode,
+  setMode,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  mode: 'visual' | 'code';
+  setMode: (m: 'visual' | 'code') => void;
+}) {
+  const editorRef = React.useRef<HTMLDivElement>(null);
+
+  // Sync internal editor content with state on mount or mode change
+  React.useEffect(() => {
+    if (editorRef.current && mode === 'visual' && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value;
+    }
+  }, [mode]);
+
+  const executeCommand = (command: string, value: string = '') => {
+    document.execCommand(command, false, value);
+    if (editorRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  const handleInput = () => {
+    if (editorRef.current) {
+      onChange(editorRef.current.innerHTML);
+    }
+  };
+
+  const insertLink = () => {
+    const url = prompt('Masukkan URL Link:');
+    if (url) executeCommand('createLink', url);
+  };
+
+  const insertImage = () => {
+    const url = prompt('Masukkan URL Gambar:');
+    if (url) executeCommand('insertImage', url);
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-sm">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-1 bg-gray-50 dark:bg-gray-900 px-3 py-2 border-b border-gray-200 dark:border-gray-800">
+        <div className="flex flex-wrap items-center gap-1">
+          {mode === 'visual' && (
+            <>
+              <button
+                type="button"
+                onClick={() => executeCommand('bold')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-750 dark:text-gray-300 font-bold text-xs cursor-pointer min-w-7 h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850"
+                title="Tebal (Bold)"
+              >
+                B
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCommand('italic')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-750 dark:text-gray-300 italic text-xs cursor-pointer min-w-7 h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850"
+                title="Miring (Italic)"
+              >
+                I
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCommand('underline')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-750 dark:text-gray-300 underline text-xs cursor-pointer min-w-7 h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850"
+                title="Garis Bawah (Underline)"
+              >
+                U
+              </button>
+              <span className="w-px h-4 bg-gray-200 dark:bg-gray-800 mx-1"></span>
+              <button
+                type="button"
+                onClick={() => executeCommand('formatBlock', '<h1>')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-750 dark:text-gray-300 text-xs font-semibold cursor-pointer h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850 px-1"
+                title="Judul Utama (H1)"
+              >
+                H1
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCommand('formatBlock', '<h2>')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-750 dark:text-gray-300 text-xs font-semibold cursor-pointer h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850 px-1"
+                title="Sub Judul (H2)"
+              >
+                H2
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCommand('formatBlock', '<p>')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-750 dark:text-gray-300 text-xs cursor-pointer h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850 px-1"
+                title="Paragraf (P)"
+              >
+                P
+              </button>
+              <span className="w-px h-4 bg-gray-200 dark:bg-gray-800 mx-1"></span>
+              <button
+                type="button"
+                onClick={() => executeCommand('insertUnorderedList')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-750 dark:text-gray-300 text-xs cursor-pointer h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850 px-1.5"
+                title="Daftar Bullet"
+              >
+                • List
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCommand('insertOrderedList')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-750 dark:text-gray-300 text-xs cursor-pointer h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850 px-1.5"
+                title="Daftar Angka"
+              >
+                1. List
+              </button>
+              <span className="w-px h-4 bg-gray-200 dark:bg-gray-800 mx-1"></span>
+              <button
+                type="button"
+                onClick={insertLink}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-indigo-600 dark:text-indigo-400 text-xs font-semibold cursor-pointer h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850 px-1.5"
+                title="Sisipkan Link"
+              >
+                Link
+              </button>
+              <button
+                type="button"
+                onClick={insertImage}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-indigo-600 dark:text-indigo-400 text-xs font-semibold cursor-pointer h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850 px-1.5"
+                title="Sisipkan Gambar"
+              >
+                Gambar
+              </button>
+              <button
+                type="button"
+                onClick={() => executeCommand('removeFormat')}
+                className="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-500 text-xs cursor-pointer h-7 flex items-center justify-center border border-gray-150 dark:border-gray-850 px-1"
+                title="Bersihkan Format"
+              >
+                Clear
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* View Mode Toggle */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setMode('visual')}
+            className={`px-2 py-1 rounded text-2xs font-semibold cursor-pointer transition-all ${
+              mode === 'visual'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-gray-500 hover:text-gray-800 dark:hover:text-white'
+            }`}
+          >
+            Visual
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('code')}
+            className={`px-2 py-1 rounded text-2xs font-semibold cursor-pointer transition-all ${
+              mode === 'code'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-gray-500 hover:text-gray-800 dark:hover:text-white'
+            }`}
+          >
+            HTML / Source
+          </button>
+        </div>
+      </div>
+
+      {/* Editor Canvas */}
+      <div className="p-4 bg-white dark:bg-gray-950 min-h-[300px] max-h-[500px] overflow-y-auto">
+        {mode === 'visual' ? (
+          <div
+            id="wysiwyg-editor-area"
+            ref={editorRef}
+            contentEditable
+            onInput={handleInput}
+            className="outline-none min-h-[280px] prose prose-slate dark:prose-invert max-w-none text-sm text-gray-800 dark:text-gray-200"
+            style={{ minHeight: '280px' }}
+            placeholder="Mulai menulis berita olahraga di sini... Blok teks untuk memformat."
+          />
+        ) : (
+          <textarea
+            id="html-editor-area"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full min-h-[280px] font-mono text-xs text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-900 border-0 focus:ring-0 p-2 outline-none rounded"
+            placeholder="<p>Mulai menulis dengan tag HTML di sini...</p>"
+          />
+        )}
+      </div>
     </div>
   );
 }

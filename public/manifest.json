@@ -1,0 +1,24 @@
+{
+  "short_name": "NusaFeed",
+  "name": "NusaFeed - Agregator & Jadwal Olahraga",
+  "description": "Agregator berita olahraga modern & jadwal pertandingan terlengkap.",
+  "icons": [
+    {
+      "src": "/src/assets/images/nusafeed_pwa_icon_1782777172105.jpg",
+      "type": "image/jpeg",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/src/assets/images/nusafeed_pwa_icon_1782777172105.jpg",
+      "type": "image/jpeg",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#4f46e5",
+  "theme_color": "#4f46e5",
+  "display": "standalone",
+  "orientation": "portrait"
+}

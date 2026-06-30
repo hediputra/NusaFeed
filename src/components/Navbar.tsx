@@ -2,11 +2,13 @@ import { Newspaper, Moon, Sun, Lock, LogOut, Search, Sparkles, Mic, MicOff } fro
 import { useState, useRef, useEffect } from 'react';
 import { FeedSource } from '../types.ts';
 
+export type AppView = 'home' | 'admin' | 'privacy' | 'terms' | 'disclaimer' | 'about' | 'contact';
+
 interface NavbarProps {
   theme: 'light' | 'dark';
   toggleTheme: () => void;
-  currentView: 'home' | 'admin';
-  setCurrentView: (view: 'home' | 'admin') => void;
+  currentView: AppView;
+  setCurrentView: (view: AppView) => void;
   isAdminLoggedIn: boolean;
   onLogout: () => void;
   searchQuery: string;
@@ -99,9 +101,9 @@ export default function Navbar({
           </div>
           <div>
             <span className="font-display text-xl font-bold tracking-tight text-gray-900 dark:text-white flex items-center gap-1.5">
-              NusaFeed
+              OneNationPress Sport
               <span className="hidden sm:inline rounded-full bg-indigo-100 px-2.5 py-0.5 text-2xs font-semibold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300">
-                Agregator & Jadwal Olahraga
+                Portal Berita & Jadwal Olahraga
               </span>
             </span>
           </div>

@@ -22,6 +22,7 @@ export interface Article {
   hashId: string;
   imageUrl?: string;
   clicks?: string[];
+  category?: string;
 }
 
 export interface ActivityLog {
